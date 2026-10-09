@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "search": {
+    "role_families": [],
+    "seniority": [
+      "entry_level",
+      "new_grad"
+    ],
+    "max_required_years_experience": 2,
+    "graduation_window": null,
+    "locations": [],
+    "work_arrangements": [],
+    "remote_eligible_regions": [],
+    "excluded_companies": [],
+    "enabled_sources": [],
+    "max_roles_to_review_per_run": 10
+  },
+  "applications": {
+    "require_exact_role_approval": true,
+    "narrative_answer_policy": "review_each",
+    "unknown_submission_retry": "never_automatic",
+    "max_concurrent_applications": 1
+  },
+  "writing": {
+    "voice": "concise, first-person, concrete, factual",
+    "avoid_em_dash": true,
+    "avoid_phrases": [
+      "delve",
+      "leverage",
+      "passionate about innovation"
+    ]
+  },
+  "schedule": {
+    "mode": "manual"
+  },
+  "confirmed_by_user_at": null
+}

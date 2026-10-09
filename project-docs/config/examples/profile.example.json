@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "candidate_id": "replace-during-setup",
+  "legal_name": null,
+  "preferred_name": null,
+  "email": null,
+  "phone": null,
+  "location": {
+    "city": null,
+    "region": null,
+    "country": null
+  },
+  "links": {
+    "linkedin": null,
+    "github": null,
+    "portfolio": null
+  },
+  "education": [],
+  "work_authorization": {
+    "country": null,
+    "authorized": null,
+    "needs_sponsorship": null
+  },
+  "availability": {
+    "start_date": null,
+    "travel": null,
+    "relocation": null
+  },
+  "resume": {
+    "path": "private/resume.pdf"
+  },
+  "facts_file": "private/config/answers.md",
+  "confirmed_by_user_at": null
+}
