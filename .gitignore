@@ -1,4 +1,10 @@
-project-docs/
 /private/
 __pycache__/
 *.py[cod]
+project-docs/START_HERE.md
+project-docs/gitignore.snippet
+project-docs/docs/TASKS.md
+project-docs/docs/PROMPTS.md
+project-docs/docs/PROGRESS.md
+project-docs/docs/ARCHITECTURE.md
+project-docs/AGENTS.md

@@ -37,7 +37,7 @@ def defaults() -> tuple[dict[str, Any], dict[str, Any]]:
         "search": {
             "role_families": [],
             "seniority": ["entry_level", "new_grad"],
-            "max_required_years_experience": 2,
+            "max_required_years_experience": None,
             "graduation_window": None,
             "locations": [],
             "work_arrangements": [],
@@ -268,17 +268,30 @@ def evaluate(job: dict[str, Any], profile: dict[str, Any], preferences: dict[str
             blockers.append("Location is missing; geographic fit is unknown")
 
     maximum = search.get("max_required_years_experience")
-    if isinstance(maximum, int):
-        for line in description.splitlines():
-            match = re.search(r"\b(\d+)\s*\+?\s*years?\b", line, re.IGNORECASE)
-            if not match or not re.search(r"required|minimum|must have|years of experience", line, re.IGNORECASE):
-                continue
-            if re.search(r"preferred|preferably|nice to have|bonus", line, re.IGNORECASE):
-                continue
-            years = int(match.group(1))
-            if years > maximum:
-                return False, evidence, [f"Requires {years} years of experience; configured maximum is {maximum}"]
-            evidence.append(f"Required experience ({years} years) is within configured maximum")
+    for line in description.splitlines():
+        if re.search(r"preferred|preferably|nice to have|bonus", line, re.IGNORECASE):
+            continue
+        range_match = re.search(
+            r"\b(\d+)\s*(?:[-–—]|to|through)\s*(\d+)\s*\+?\s*(?:years?|yrs?)\b",
+            line,
+            re.IGNORECASE,
+        )
+        years_match = range_match or re.search(r"\b(\d+)\s*\+?\s*(?:years?|yrs?)\b", line, re.IGNORECASE)
+        requirement = re.search(
+            r"\b(required|minimum|must have)\b|(?:years?|yrs?).{0,24}\bexperience\b|\bexperience\b.{0,24}(?:years?|yrs?)",
+            line,
+            re.IGNORECASE,
+        )
+        if not years_match or not requirement:
+            continue
+        minimum_years = int(years_match.group(1))
+        statement = range_match.group(0) if range_match else f"{minimum_years} years"
+        if isinstance(maximum, int) and minimum_years > maximum:
+            return False, evidence, [f"Requires {statement} of experience; minimum exceeds configured maximum of {maximum} years"]
+        if isinstance(maximum, int):
+            evidence.append(f"Required experience: {statement}; minimum is within configured maximum of {maximum} years")
+        else:
+            blockers.append(f"Required experience is stated ({statement}); no experience threshold is configured")
 
     graduation_window = search.get("graduation_window")
     if isinstance(graduation_window, dict):

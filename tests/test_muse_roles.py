@@ -85,6 +85,7 @@ class MuseRolesTests(unittest.TestCase):
         db.close()
 
     def test_filters_required_experience_but_not_preferred_experience(self):
+        self.preferences["search"]["max_required_years_experience"] = 2
         job = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
                "work_arrangement": "on_site", "description": "Required: 5 years of experience."}
         included, _, blockers = muse_roles.evaluate(job, self.profile, self.preferences)
@@ -94,6 +95,14 @@ class MuseRolesTests(unittest.TestCase):
         included, _, blockers = muse_roles.evaluate(job, self.profile, self.preferences)
         self.assertTrue(included)
         self.assertFalse(blockers)
+
+    def test_entry_level_does_not_imply_an_experience_ceiling(self):
+        self.assertIsNone(self.preferences["search"]["max_required_years_experience"])
+        job = {"company": "Acme", "title": "Junior Software Engineer", "location": "New York, NY",
+               "work_arrangement": "on_site", "description": "Experience: 0–3 years."}
+        included, _, blockers = muse_roles.evaluate(job, self.profile, self.preferences)
+        self.assertTrue(included)
+        self.assertTrue(any("0–3 years" in item and "no experience threshold is configured" in item for item in blockers))
 
     def test_unknown_geography_and_authorization_remain_visible_as_blockers(self):
         self.preferences["search"]["locations"] = ["Seattle"]
