@@ -59,6 +59,10 @@ Local tests use mocked feed payloads, synthetic candidate data, and temporary SQ
 - Export produced three rows with expected columns. Muse inspected public application pages without entering candidate data. No decisions, uploads, applications, or submissions occurred.
 - Muse reported that it treated entry-level as a two-years-of-experience ceiling. That was not an explicit user preference. The local default and example now use null; required experience stays reviewable until a user-chosen threshold exists. Existing private preferences are not overwritten, so check and clear a legacy `2` only if the user did not explicitly choose it.
 
+### Supplemental integrated-browser check — 2026-10-09
+
+VS Code's integrated browser (not Muse) filled and submitted synthetic placeholder values to `https://httpbin.org/forms/post`; the response at `/post` echoed the submitted fields. No candidate data was used. This fixture has no resume upload and was not connected to the tracker. It does not count as Muse controlled-form verification.
+
 ## Muse verification handoff
 
 Paste this prompt into Muse only after making the repository available there. It uses isolated synthetic state and does not authorize applications:

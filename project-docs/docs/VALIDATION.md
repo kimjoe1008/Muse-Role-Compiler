@@ -35,6 +35,8 @@ If Muse is unavailable to the coding agent, these remain pending. Preparing a ha
 
 Use an existing reachable test fixture or a minimal disposable page, synthetic facts, and a synthetic one-file resume. Keep fixture state separate from live candidate state. No employer endpoint is a test fixture.
 
+On 2026-10-09, VS Code's integrated browser filled and submitted synthetic placeholder fields to the public httpbin echo form; the returned page echoed the fields. This was not Muse's native browser, did not include a file upload, and was not connected to tracker state. It is supplemental form evidence only; the Muse controlled-form check remains NOT_RUN.
+
 | Case | Observed expected behavior |
 | --- | --- |
 | Approved normal form | Fill/upload, persist progress, submit, capture confirmation, update tracker |
