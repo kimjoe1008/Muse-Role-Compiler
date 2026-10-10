@@ -4,6 +4,7 @@ import csv
 import hashlib
 import io
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -26,11 +27,66 @@ class MuseRolesTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def cli(self, root, *arguments):
+        command = [sys.executable, str(Path(muse_roles.__file__).resolve()), "--root", str(root), *arguments]
+        return subprocess.run(command, text=True, capture_output=True)
+
+    def approved_job(self, description="", destination=None):
+        self.paths["resume"].write_bytes(b"synthetic resume")
+        self.profile["confirmed_by_user_at"] = "2026-10-09"
+        self.paths["profile"].write_text(json.dumps(self.profile), encoding="utf-8")
+        self.paths["preferences"].write_text(json.dumps(self.preferences), encoding="utf-8")
+        db = muse_roles.connect(self.paths["database"])
+        raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+               "url": "https://jobs.example/role", "id": "req-1", "description": description}
+        job_id, _ = muse_roles.save_record(db, raw, "muse", "observed", self.profile, self.preferences)
+        db.commit()
+        db.close()
+        args = ["decide", job_id, "approve"]
+        if destination:
+            args.extend(("--destination", destination))
+        result = self.cli(self.root, *args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return job_id
+
     def test_initialize_preserves_existing_private_configuration(self):
         profile_path = self.paths["profile"]
         profile_path.write_text('{"private":"kept"}', encoding="utf-8")
         muse_roles.initialize(self.root)
         self.assertEqual(json.loads(profile_path.read_text(encoding="utf-8")), {"private": "kept"})
+
+    def test_tracker_migration_preserves_decisions_and_adds_attempt_tables(self):
+        database = self.paths["database"]
+        db = sqlite3.connect(database)
+        db.executescript(
+            """
+            DROP TABLE decisions;
+            DROP TABLE jobs;
+            CREATE TABLE jobs (
+                job_id TEXT PRIMARY KEY, company TEXT NOT NULL, title TEXT NOT NULL,
+                location TEXT NOT NULL, work_arrangement TEXT NOT NULL, canonical_url TEXT NOT NULL,
+                provider TEXT NOT NULL, tenant TEXT NOT NULL, requisition_id TEXT, description TEXT NOT NULL,
+                fit_evidence TEXT NOT NULL, blockers TEXT NOT NULL, first_seen TEXT NOT NULL, last_seen TEXT NOT NULL
+            );
+            CREATE TABLE decisions (
+                decision_id INTEGER PRIMARY KEY AUTOINCREMENT, job_id TEXT NOT NULL,
+                status TEXT NOT NULL, decided_at TEXT NOT NULL, resume_sha256 TEXT,
+                answer_policy TEXT, evidence TEXT NOT NULL
+            );
+            INSERT INTO jobs VALUES ('J-OLD', 'Acme', 'Engineer', 'NY', 'on_site',
+                'https://jobs.example/old', 'muse', 'observed', NULL, '', '[]', '[]', 't1', 't2');
+            INSERT INTO decisions(job_id, status, decided_at, evidence)
+                VALUES ('J-OLD', 'SKIPPED', 't2', 'historic choice');
+            """
+        )
+        db.close()
+        migrated = muse_roles.connect(database)
+        decision = migrated.execute("SELECT status, evidence, destination_url, approved_job_url FROM decisions").fetchone()
+        tables = {row["name"] for row in migrated.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        migrated.close()
+        self.assertEqual((decision["status"], decision["evidence"], decision["destination_url"],
+                  decision["approved_job_url"]), ("SKIPPED", "historic choice", None, None))
+        self.assertTrue({"attempts", "attempt_events"}.issubset(tables))
 
     def test_cli_init_and_inspect(self):
         root = self.root / "fresh"
@@ -215,6 +271,135 @@ class MuseRolesTests(unittest.TestCase):
         result = subprocess.run(command, text=True, capture_output=True)
         self.assertEqual(result.returncode, 2)
         self.assertIn("completed private setup", result.stderr)
+
+    def test_preflight_and_attempt_start_reject_unapproved_role(self):
+        db = muse_roles.connect(self.paths["database"])
+        raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+               "url": "https://jobs.example/role", "id": "req-1", "description": ""}
+        job_id, _ = muse_roles.save_record(db, raw, "muse", "observed", self.profile, self.preferences)
+        db.commit()
+        db.close()
+        self.paths["resume"].write_bytes(b"synthetic resume")
+        self.profile["confirmed_by_user_at"] = "2026-10-09"
+        self.paths["profile"].write_text(json.dumps(self.profile), encoding="utf-8")
+        blocked = self.cli(self.root, "preflight", job_id)
+        self.assertEqual(json.loads(blocked.stdout)["status"], "BLOCKED")
+        start = self.cli(self.root, "attempt", "start", job_id)
+        self.assertEqual(start.returncode, 2)
+        db = muse_roles.connect(self.paths["database"])
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 0)
+        db.close()
+
+    def test_preflight_binds_destination_resume_policy_and_current_approval(self):
+        job_id = self.approved_job(destination="https://apply.example/form?utm_source=board")
+        ready = self.cli(self.root, "preflight", job_id)
+        self.assertEqual(ready.returncode, 0, ready.stderr)
+        self.assertEqual(json.loads(ready.stdout)["status"], "READY")
+        wrong_destination = self.cli(self.root, "preflight", job_id, "--destination", "https://other.example/apply")
+        self.assertEqual(json.loads(wrong_destination.stdout)["status"], "BLOCKED")
+        self.paths["resume"].write_bytes(b"changed synthetic resume")
+        changed_resume = self.cli(self.root, "preflight", job_id)
+        self.assertIn("resume", ";".join(json.loads(changed_resume.stdout)["reasons"]))
+        self.paths["resume"].write_bytes(b"synthetic resume")
+        self.preferences["applications"]["narrative_answer_policy"] = "draft_from_approved_facts"
+        self.paths["preferences"].write_text(json.dumps(self.preferences), encoding="utf-8")
+        changed_policy = self.cli(self.root, "preflight", job_id)
+        self.assertIn("policy changed", ";".join(json.loads(changed_policy.stdout)["reasons"]))
+        self.preferences["applications"]["narrative_answer_policy"] = "review_each"
+        self.paths["preferences"].write_text(json.dumps(self.preferences), encoding="utf-8")
+        changed_profile = dict(self.profile, preferred_name="Updated synthetic name")
+        self.paths["profile"].write_text(json.dumps(changed_profile), encoding="utf-8")
+        changed_facts = self.cli(self.root, "preflight", job_id)
+        self.assertIn("candidate facts", ";".join(json.loads(changed_facts.stdout)["reasons"]))
+        self.paths["profile"].write_text(json.dumps(self.profile), encoding="utf-8")
+        db = muse_roles.connect(self.paths["database"])
+        db.execute("UPDATE jobs SET title='Senior Software Engineer' WHERE job_id=?", (job_id,))
+        db.commit()
+        db.close()
+        changed_posting = self.cli(self.root, "preflight", job_id)
+        self.assertIn("role details changed", ";".join(json.loads(changed_posting.stdout)["reasons"]))
+        db = muse_roles.connect(self.paths["database"])
+        db.execute("UPDATE jobs SET title='Software Engineer I' WHERE job_id=?", (job_id,))
+        db.commit()
+        db.close()
+        self.cli(self.root, "decide", job_id, "revoke")
+        revoked = self.cli(self.root, "preflight", job_id)
+        self.assertIn("REVOKED", ";".join(json.loads(revoked.stdout)["reasons"]))
+
+    def test_attempts_pause_for_review_and_require_resolution_before_resume(self):
+        job_id = self.approved_job(description="Must be authorized to work in the US.")
+        preflight_result = self.cli(self.root, "preflight", job_id)
+        self.assertEqual(json.loads(preflight_result.stdout)["status"], "NEEDS_HUMAN")
+        started = self.cli(self.root, "attempt", "start", job_id)
+        self.assertEqual(started.returncode, 0, started.stderr)
+        attempt = json.loads(started.stdout)
+        self.assertEqual(attempt["state"], "NEEDS_HUMAN")
+        no_resolution = self.cli(self.root, "attempt", "update", attempt["attempt_id"], "--state", "IN_PROGRESS")
+        self.assertEqual(no_resolution.returncode, 2)
+        self.assertIn("--resolution", no_resolution.stderr)
+        resumed = self.cli(self.root, "attempt", "update", attempt["attempt_id"], "--state", "IN_PROGRESS",
+                           "--resolution", "User confirmed eligibility based on the employer's stated requirement.")
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.cli(self.root, "decide", job_id, "revoke")
+        revoked_before_submit = self.cli(self.root, "attempt", "update", attempt["attempt_id"],
+                                         "--state", "SUBMITTING", "--stage", "final review")
+        self.assertEqual(revoked_before_submit.returncode, 2)
+        self.assertIn("REVOKED", revoked_before_submit.stderr)
+
+    def test_uncertain_submission_cannot_be_retried_and_keeps_event_history(self):
+        job_id = self.approved_job()
+        started = self.cli(self.root, "attempt", "start", job_id)
+        attempt_id = json.loads(started.stdout)["attempt_id"]
+        self.cli(self.root, "attempt", "update", attempt_id, "--state", "SUBMITTING", "--stage", "submit")
+        unknown = self.cli(self.root, "attempt", "update", attempt_id, "--state", "SUBMISSION_UNKNOWN",
+                           "--stage", "waiting for confirmation", "--evidence", "Submit action may have completed; confirmation unavailable.",
+                           "--evidence-source", "agent_observed")
+        self.assertEqual(unknown.returncode, 0, unknown.stderr)
+        retry = self.cli(self.root, "attempt", "start", job_id)
+        self.assertEqual(retry.returncode, 2)
+        self.assertIn("SUBMISSION_UNKNOWN", retry.stderr)
+        invalid_retry = self.cli(self.root, "attempt", "update", attempt_id, "--state", "IN_PROGRESS")
+        self.assertEqual(invalid_retry.returncode, 2)
+        detail = self.cli(self.root, "attempt", "show", attempt_id)
+        self.assertEqual(len(json.loads(detail.stdout)["events"]), 3)
+
+    def test_submitting_attempt_cannot_be_closed_without_resolving_uncertainty(self):
+        job_id = self.approved_job()
+        attempt_id = json.loads(self.cli(self.root, "attempt", "start", job_id).stdout)["attempt_id"]
+        self.cli(self.root, "attempt", "update", attempt_id, "--state", "SUBMITTING", "--stage", "submit")
+        closed = self.cli(self.root, "attempt", "update", attempt_id, "--state", "CLOSED",
+                          "--evidence", "No confirmation was observed.")
+        self.assertEqual(closed.returncode, 2)
+        self.assertIn("Invalid attempt transition", closed.stderr)
+
+    def test_applied_requires_confirmation_evidence_and_updates_csv(self):
+        job_id = self.approved_job()
+        attempt_id = json.loads(self.cli(self.root, "attempt", "start", job_id).stdout)["attempt_id"]
+        self.cli(self.root, "attempt", "update", attempt_id, "--state", "SUBMITTING", "--stage", "submit")
+        missing_evidence = self.cli(self.root, "attempt", "update", attempt_id, "--state", "APPLIED")
+        self.assertEqual(missing_evidence.returncode, 2)
+        self.assertIn("confirmation evidence", missing_evidence.stderr)
+        applied = self.cli(self.root, "attempt", "update", attempt_id, "--state", "APPLIED",
+                           "--evidence", "Application confirmation page shows Acme and requisition req-1.",
+                           "--evidence-source", "job_confirmation")
+        self.assertEqual(applied.returncode, 0, applied.stderr)
+        self.cli(self.root, "export")
+        with (self.paths["exports"] / "roles.csv").open(encoding="utf-8-sig", newline="") as stream:
+            row = next(csv.DictReader(stream))
+        self.assertEqual(row["application_state"], "APPLIED")
+        self.assertTrue(row["applied_at"])
+
+    def test_closed_attempt_needs_reason_for_new_attempt(self):
+        job_id = self.approved_job()
+        attempt_id = json.loads(self.cli(self.root, "attempt", "start", job_id).stdout)["attempt_id"]
+        closed = self.cli(self.root, "attempt", "update", attempt_id, "--state", "CLOSED",
+                          "--evidence", "User chose not to continue this application.")
+        self.assertEqual(closed.returncode, 0, closed.stderr)
+        no_reason = self.cli(self.root, "attempt", "start", job_id)
+        self.assertEqual(no_reason.returncode, 2)
+        self.assertIn("--reason", no_reason.stderr)
+        restarted = self.cli(self.root, "attempt", "start", job_id, "--reason", "User explicitly asked to resume.")
+        self.assertEqual(restarted.returncode, 0, restarted.stderr)
 
 
 if __name__ == "__main__":

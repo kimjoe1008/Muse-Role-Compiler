@@ -10,12 +10,14 @@ Test the behavior being changed. Reuse current tests and fixtures; do not build 
 | Discovery | Two enabled source types yield normalized records or honest source failures; URL ingestion uses the same path |
 | Identity | Same verified requisition from two sources becomes one record; distinct IDs with identical titles stay separate |
 | Filters | Required versus preferred experience, geographic/remote restrictions, and unknown eligibility behave as configured |
-| Approval | Exact selection persists; absent/revoked approval, changed resume, and imported status cannot permit an attempt |
-| Recovery | Existing applied/active/unknown attempts block duplicate starts; a possible submit is not retried from missing confirmation |
-| CSV | Expected columns are present; formula-like external values are neutralized; export never changes approval |
-| Migration | A copied existing tracker preserves IDs/history/unresolved attempts; repeated import is idempotent |
+| Approval | Exact selection persists; absent/revoked approval, changed resume/context/policy/posting/destination cannot permit an attempt |
+| Recovery | Existing applied/active/unknown attempts block duplicate starts; SUBMITTING cannot be treated as a known failure; possible submit is not retried |
+| CSV | Expected columns and current attempt outcome are present; formula-like external values are neutralized; export never changes approval |
+| Migration | Additive migration preserves old decisions and adds attempt history without rewriting job IDs or decisions |
 
 Run only the applicable migration check if migration changes. Retain required repository gates; do not use historic Windows sandbox tests as Muse acceptance criteria.
+
+The local synthetic attempt suite validates these tracker rules but is not a browser integration test. Actual Muse checks for controlled-form fill/handoff/submit remain pending; see the observed status in PROGRESS.md and exact commands in MUSE_GUIDE.md.
 
 ## Actual Muse feasibility check
 

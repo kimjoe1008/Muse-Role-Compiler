@@ -16,13 +16,13 @@ Role approval is required before candidate details are entered or uploaded. Ther
 
 ## Development status
 
-The repository includes portable discovery, review, preflight, and outcome-tracking helpers. Read [PROGRESS](project-docs/docs/PROGRESS.md) for observed status and [TASKS](project-docs/docs/TASKS.md) for remaining work. Muse has verified bounded discovery and public-page inspection; controlled-form behavior and cross-session persistence remain unverified.
+The repository includes portable discovery, review, preflight, and outcome-tracking helpers. Read [PROGRESS](docs/PROGRESS.md) for observed status and [TASKS](docs/TASKS.md) for remaining work. Muse has verified bounded discovery and public-page inspection; controlled-form behavior and cross-session persistence remain unverified.
 
-To develop this repository, start with [START_HERE](project-docs/START_HERE.md) and the [coding-agent prompt](project-docs/docs/PROMPTS.md). Reuse working discovery/tracking code. No new dashboard, Windows sandbox, custom model service, or browser automation framework is needed.
+To develop an existing repository, start with [START_HERE](START_HERE.md) and the [coding-agent prompt](docs/PROMPTS.md). Reuse working discovery/tracking code. No new dashboard, Windows sandbox, custom model service, or browser automation framework is needed.
 
 ## Use with Muse
 
-Make the repository accessible through a supported route and explicitly ask Muse to read [MUSE_GUIDE](project-docs/docs/MUSE_GUIDE.md). Repository access, code execution, browser/file-upload support, and persistence must be checked in your actual Muse session. No specific upload route or platform integration is assumed.
+Make the repository accessible through a supported route and explicitly ask Muse to read [MUSE_GUIDE](docs/MUSE_GUIDE.md). Repository access, code execution, browser/file-upload support, and persistence must be checked in your actual Muse session. No specific upload route or platform integration is assumed.
 
 The guide contains tested local commands, private state paths, and a sanitized Muse handoff. Preflight and outcome records are advisory workflow checks, not a security boundary over Muse's browser tools. Complete the controlled-form checks before any live application.
 
