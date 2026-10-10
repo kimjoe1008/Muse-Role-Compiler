@@ -61,7 +61,7 @@ Local tests use mocked feed payloads, synthetic candidate data, and temporary SQ
 
 ### Supplemental integrated-browser check — 2026-10-09
 
-VS Code's integrated browser (not Muse) filled and submitted synthetic placeholder values to `https://httpbin.org/forms/post`; the response at `/post` echoed the submitted fields. No candidate data was used. This fixture has no resume upload and was not connected to the tracker. It does not count as Muse controlled-form verification.
+VS Code's integrated browser (not Muse) filled and submitted synthetic placeholder values to `https://httpbin.org/forms/post`; the response at `/post` echoed the fixture ID. A disposable multipart form also uploaded a synthetic file whose contents were echoed by httpbin. In a fresh OS temporary directory (`muse-n2-smoke-<random>/private/state/roles.sqlite3`), each synthetic role was approved for that destination, preflight returned `READY`, and attempts were persisted as `IN_PROGRESS` before form entry/upload and `SUBMITTING` before submit, then `APPLIED` with fixture response evidence. `attempt show` recorded three events per attempt; CSV export contained two rows. No candidate data was used and no employer application occurred. This does not count as Muse controlled-form verification or validate a real application form.
 
 ## Muse verification handoff
 
