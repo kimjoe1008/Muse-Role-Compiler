@@ -609,7 +609,7 @@ def create_attempt(db: sqlite3.Connection, root: Path, job_id: str, destination:
 
 
 ATTEMPT_TRANSITIONS = {
-    "IN_PROGRESS": {"NEEDS_HUMAN", "SUBMITTING", "CLOSED"},
+    "IN_PROGRESS": {"NEEDS_HUMAN", "SUBMITTING", "SUBMISSION_UNKNOWN", "CLOSED"},
     "NEEDS_HUMAN": {"IN_PROGRESS", "APPLIED", "CLOSED"},
     "SUBMITTING": {"NEEDS_HUMAN", "APPLIED", "SUBMISSION_UNKNOWN"},
     "SUBMISSION_UNKNOWN": {"APPLIED", "CLOSED"},

@@ -363,6 +363,21 @@ class MuseRolesTests(unittest.TestCase):
         detail = self.cli(self.root, "attempt", "show", attempt_id)
         self.assertEqual(len(json.loads(detail.stdout)["events"]), 3)
 
+    def test_interrupted_in_progress_attempt_can_be_reconciled_as_unknown(self):
+        job_id = self.approved_job()
+        attempt_id = json.loads(self.cli(self.root, "attempt", "start", job_id).stdout)["attempt_id"]
+        missing_evidence = self.cli(self.root, "attempt", "update", attempt_id,
+                                    "--state", "SUBMISSION_UNKNOWN")
+        self.assertEqual(missing_evidence.returncode, 2)
+        unknown = self.cli(self.root, "attempt", "update", attempt_id,
+                           "--state", "SUBMISSION_UNKNOWN", "--stage", "interrupted during browser session",
+                           "--evidence", "Session ended before submission status could be determined.",
+                           "--evidence-source", "agent_observed")
+        self.assertEqual(unknown.returncode, 0, unknown.stderr)
+        retry = self.cli(self.root, "attempt", "start", job_id)
+        self.assertEqual(retry.returncode, 2)
+        self.assertIn("SUBMISSION_UNKNOWN", retry.stderr)
+
     def test_submitting_attempt_cannot_be_closed_without_resolving_uncertainty(self):
         job_id = self.approved_job()
         attempt_id = json.loads(self.cli(self.root, "attempt", "start", job_id).stdout)["attempt_id"]

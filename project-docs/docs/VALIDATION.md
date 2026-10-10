@@ -17,7 +17,7 @@ Test the behavior being changed. Reuse current tests and fixtures; do not build 
 
 Run only the applicable migration check if migration changes. Retain required repository gates; do not use historic Windows sandbox tests as Muse acceptance criteria.
 
-The local synthetic attempt suite validates these tracker rules but is not a browser integration test. Actual Muse checks for controlled-form fill/handoff/submit remain pending; see the observed status in PROGRESS.md and exact commands in MUSE_GUIDE.md.
+The local synthetic attempt suite validates these tracker rules, including reconciliation of interrupted IN_PROGRESS attempts to SUBMISSION_UNKNOWN, but is not a Muse browser integration test. Actual Muse checks for controlled-form fill/handoff/submit remain pending; see the observed status in PROGRESS.md and exact commands in MUSE_GUIDE.md.
 
 ## Actual Muse feasibility check
 

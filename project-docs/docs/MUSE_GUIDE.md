@@ -106,6 +106,8 @@ python muse_roles.py attempt update ATTEMPT-ID --state SUBMISSION_UNKNOWN --stag
 python muse_roles.py attempt show ATTEMPT-ID
 ```
 
+After an interrupted run, inspect the attempt before acting. If an `IN_PROGRESS` or `SUBMITTING` attempt may have transmitted or submitted data, reconcile it with `attempt update ATTEMPT-ID --state SUBMISSION_UNKNOWN --evidence "..." --evidence-source agent_observed`; this records uncertainty and blocks retries. Do not mark a stale attempt `CLOSED` merely because confirmation is missing.
+
 `APPLIED` requires job-specific confirmation or an explicitly labeled `user_reported` completion. A `SUBMITTING` attempt cannot be closed as a known failure; resolve it as `APPLIED`, or record `SUBMISSION_UNKNOWN`. Unknown outcomes cannot be restarted automatically. A `CLOSED` attempt can be followed by a new attempt only with `attempt start J-ID --reason "..."` containing the user's explicit direction. Export reflects the latest attempt state and applied date. None of these local records independently enforce Muse's browser behavior.
 
 For the controlled-form check, use Muse's native browser tools. Do not create a custom submission POST, bypass login/CAPTCHA, or introduce password/email-code handling.
