@@ -8,7 +8,9 @@ Test the behavior being changed. Reuse current tests and fixtures; do not build 
 | --- | --- |
 | Portability | Active discovery/tracker entry point runs without Windows-worker dependencies |
 | Discovery | Two enabled source types yield normalized records or honest source failures; URL ingestion uses the same path |
+| Coverage | Bounded scans report records/pages checked, paging limits, failures, and avoid claiming unscanned feed entries contain no matches |
 | Identity | Same verified requisition from two sources becomes one record; distinct IDs with identical titles stay separate |
+| History import | Repeated CSV import is idempotent; exact matches preserve status/date/source; conflicting histories and weak matches are surfaced rather than merged silently; imports never approve |
 | Filters | Required versus preferred experience, geographic/remote restrictions, and unknown eligibility behave as configured |
 | Approval | Exact selection persists; absent/revoked approval, changed resume/context/policy/posting/destination cannot permit an attempt |
 | Recovery | Existing applied/active/unknown attempts block duplicate starts; SUBMITTING cannot be treated as a known failure; possible submit is not retried |

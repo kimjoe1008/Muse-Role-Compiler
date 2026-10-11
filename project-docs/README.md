@@ -1,22 +1,22 @@
 # Muse Job Assistant
 
-A small repository for a personal job search operated through Muse.
+A discovery-first workspace for finding, evaluating, deduplicating, and tracking roles with Muse.
 
-Muse finds and reviews roles using repository tools, presents matches for your selection, then uses its available browser tools to complete approved applications. The repository keeps configuration, discovery results, approvals, and outcomes between runs.
+Muse searches and reviews roles using repository tools, presents new and materially changed matches, and keeps them distinct from roles already saved or applied to. The repository keeps source provenance, preferences, review decisions, and outcomes between runs. Application assistance is a separate opt-in workflow.
 
 ## Intended daily flow
 
-1. Ask Muse to find entry-level/new-grad roles matching your location and eligibility preferences.
-2. Review one deduplicated list with links, fit explanations, and issues that need your attention.
-3. Approve specific roles to apply to, or skip/defer them.
-4. Muse applies to approved roles with your single resume and confirmed facts. It pauses individual applications for missing answers, suspicious instructions, human-only requirements, login, or CAPTCHA.
-5. Review results and export the tracker to CSV.
+1. Configure role families, locations, seniority, and eligibility preferences.
+2. Search direct ATS boards and other supported or manually inspected sources, with scan limits and failures reported.
+3. Review a deduplicated list of new or changed roles, with links, evidence, and blockers.
+4. Save, skip, or defer exact roles, and keep past outcomes in the tracker to reduce repeat results.
+5. Export the maintained tracker. Separately request application help only for exact roles you choose.
 
 Role approval is required before candidate details are entered or uploaded. There is no additional project-required final confirmation for an ordinary approved application; Muse's own required confirmations still apply.
 
 ## Development status
 
-The repository includes portable discovery, review, preflight, and outcome-tracking helpers. Read [PROGRESS](docs/PROGRESS.md) for observed status and [TASKS](docs/TASKS.md) for remaining work. Muse has verified bounded discovery and public-page inspection; controlled-form behavior and cross-session persistence remain unverified.
+The repository includes portable Greenhouse/Lever discovery, review, preflight, and outcome-tracking helpers. CSV history import and broader source coverage are planned, not implemented. Read [PROGRESS](docs/PROGRESS.md) for observed status and [TASKS](docs/TASKS.md) for the current discovery-first priorities.
 
 To develop an existing repository, start with [START_HERE](START_HERE.md) and the [coding-agent prompt](docs/PROMPTS.md). Reuse working discovery/tracking code. No new dashboard, Windows sandbox, custom model service, or browser automation framework is needed.
 

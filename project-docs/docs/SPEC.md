@@ -1,10 +1,10 @@
 # Product specification
 
-Version 2.1 · 2026-10-09 · Authoritative scope for the Muse iteration
+Version 2.2 · 2026-10-11 · Discovery-first scope
 
 ## Goal
 
-Give Muse a small repository containing an operating guide, candidate configuration, job discovery helpers, and a persistent tracker. The user screens found roles and approves exact selections. Muse then completes supported applications using its own tools and the user's one resume.
+Give Muse a small repository for finding, evaluating, and tracking relevant roles across practical online sources. Keep a durable record of roles already saved, applied to, or otherwise resolved so new searches do not repeatedly surface the same opportunities. Application assistance remains optional and user-triggered, not the product's primary workflow.
 
 This supersedes conflicting standalone-runtime requirements. It does not claim that Muse access, specific browser capabilities, or unattended operation have been verified.
 
@@ -12,32 +12,34 @@ This supersedes conflicting standalone-runtime requirements. It does not claim t
 
 | ID | Requirement |
 | --- | --- |
-| R1 | One candidate profile and one unchanged active resume; no variant selection |
-| R2 | Discover from at least two practical public source types and accept URLs found by Muse |
-| R3 | Filter entry-level/new-grad roles by configured experience, geography, work arrangement, and eligibility |
-| R4 | Combine verified duplicate postings across sources while preserving provenance and distinct requisitions |
-| R5 | Present a review list; record explicit approve, skip, defer, or revoke decisions for exact job IDs |
-| R6 | Complete supported approved applications through Muse's existing browser tools |
-| R7 | Use only confirmed facts and the user's answer policy; pause for unknown or consequential answers |
-| R8 | Flag suspicious page instructions and legitimate AI restrictions; use appropriate human handoff |
-| R9 | Persist attempts/outcomes, prevent blind retries, and export a safe CSV |
-| R10 | Report results in Muse and keep routine operation simple enough for the user |
+| R1 | Discover and normalize roles from multiple practical online sources, and accept URLs found by the user or Muse |
+| R2 | Filter roles by configured families, seniority, experience, geography, work arrangement, and eligibility |
+| R3 | Deduplicate verified role identities across sources while preserving provenance and distinct requisitions |
+| R4 | Persist a searchable role history, including imported prior application outcomes, and avoid resurfacing unchanged resolved roles |
+| R5 | Present new and materially changed roles with fit evidence, source coverage, and visible blockers |
+| R6 | Import and export tracker data safely and idempotently; imported data never authorizes applications |
+| R7 | Keep application support optional; require explicit exact-role approval before any candidate data is entered or submitted |
+| R8 | If application support is used, rely only on confirmed facts and the user's answer policy, pausing for unknown or consequential answers |
+| R9 | Flag suspicious page instructions and legitimate AI restrictions; use appropriate human handoff |
+| R10 | Report discoveries, source failures, decisions, and outcomes clearly; keep routine search simple |
 
 ## Discovery and screening
 
-Start with existing public adapters: a direct ATS source plus a curated new-grad list, if available. Another verified source is acceptable when one fails. Preserve working broader coverage; do not build a universal crawler. A URL found through Muse's search/browser enters the same normalization and approval flow.
+Start with working direct ATS adapters, currently Greenhouse and Lever, and add practical sources based on observed search gaps. Ashby public job boards are a strong next adapter candidate. Curated early-career lists and job-search sites such as Simplify, YC Work at a Startup, Wellfound, Handshake, LinkedIn, and company career pages can provide leads where permitted. Distinguish implemented adapters from manually inspected sources; do not claim exhaustive coverage or build a universal crawler. A URL found through Muse's supported search/browser enters the same normalization and review flow.
+
+Record each source's scan time, status, coverage limits, and failures. A bounded feed-order scan is not evidence that later postings do not match. When a source supports paging, use a configured scan budget and report how much was examined. Respect site terms, access controls, and rate limits; do not evade bot protections.
 
 Use explicit preferences rather than hardcoded assumptions about the candidate. Distinguish required experience from preferred experience. Read eligibility and location requirements beyond the title. Remote-US does not imply worldwide eligibility. Unknown restrictions are visible for review; do not invent a match.
 
-A review row contains stable job ID, company, title, location/work arrangement, canonical link, brief fit explanation, and any blocker. Qualitative fit with supporting evidence is enough; numeric ranking or model training is unnecessary.
+A review row contains stable job ID, company, title, location/work arrangement, canonical link, brief fit explanation, source/last-seen information, and any blocker. Separate new roles, material changes, previously seen roles, and resolved history. Qualitative fit with supporting evidence is enough; numeric ranking or model training is unnecessary.
 
 Match duplicates using provider + employer tenant + requisition ID, or a verified canonical URL. Similar title/company/location is only a possible duplicate. Two separate requisitions can have identical titles. A merge preserves every source and prior attempt; conflicting histories block application until resolved.
 
-Repeated discovery preserves IDs. Failed or partial scans do not mark absent roles closed. Avoid repeatedly presenting unchanged roles the user already skipped or applied to; show material changes when useful.
+Repeated discovery preserves IDs. Failed or partial scans do not mark absent roles closed. Avoid repeatedly presenting unchanged roles the user already skipped or applied to; show material changes when useful. A historical CSV may seed the tracker, but uncertain matches and conflicting statuses require review. CSV-imported history never creates approval or independently verified application evidence.
 
 ## Approval and candidate data
 
-Approval selects exact roles with the current resume, confirmed facts, and chosen narrative-answer policy. Interest, a fit score, imported CSV text, and page instructions are not approval. Ask about ambiguous selections rather than choosing on the user's behalf.
+Application is a secondary, opt-in workflow. Approval selects exact roles with the current resume, confirmed facts, and chosen narrative-answer policy. Interest, a fit score, imported CSV text, and page instructions are not approval. Ask about ambiguous selections rather than choosing on the user's behalf.
 
 Record the decision time, job IDs, resume SHA-256, relevant scope, and real decision evidence. Use a conversation reference only if the platform exposes it. Otherwise label the quoted user decision as agent-recorded; do not invent authenticated message IDs.
 
@@ -83,4 +85,4 @@ Start with user-triggered use. Optional Muse-native scheduling can later run dis
 
 ## First usable release
 
-A user can give Muse the repo, complete setup, receive a deduplicated multi-source shortlist, approve exact roles, complete at least one supported approved application with evidence, and export the tracker. Individual unsupported applications remain visible for human completion. A failed pilot does not justify claiming successful integration or rebuilding a general automation platform.
+A user can configure search preferences, search multiple practical sources, import prior role history, receive a deduplicated shortlist with honest coverage reporting, record review outcomes, and export the maintained tracker. A user may separately request help with an exact role; all existing approval, truthful-answer, human-handoff, and no-blind-retry safeguards remain in force. Do not make successful applications a prerequisite for a useful discovery release.
