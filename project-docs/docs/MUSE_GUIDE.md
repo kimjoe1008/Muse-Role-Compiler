@@ -38,7 +38,7 @@ Private files are created under `private/`: `config/profile.json`, `config/prefe
 
 Use `source add` and `source remove` to change only `search.enabled_sources`; these commands preserve the rest of private preferences. They do not select role families, locations, or candidate details. Review configured boards with `python muse_roles.py source list` before discovery.
 
-Use `python muse_roles.py search show` to inspect current search settings. `search configure` replaces only fields supplied on the command, preserving other filters and sources. Repeat list options for multiple values, such as `--role-family "Software Engineer" --role-family "Product Manager"`. Use `--clear-locations`, `--clear-role-families`, `--clear-seniority`, or `--clear-work-arrangements` to explicitly empty those lists; `--clear-experience-limit` sets the required-years limit to null. `--max-required-years 0` is a valid explicit setting. No candidate preferences are inferred by these commands.
+Use `python muse_roles.py search show` to inspect current search settings. `search configure` replaces only fields supplied on the command, preserving other filters and sources. Repeat list options for multiple values, such as `--role-family "Software Engineer" --role-family "Product Manager"`. It supports `--graduation-start-year` with `--graduation-end-year`, repeated `--remote-eligible-region` and `--exclude-company` values, as well as work-arrangement, location, seniority, and experience limits. Use the corresponding `--clear-*` flags to explicitly empty lists or clear graduation/experience limits. `--max-required-years 0` is a valid explicit setting. No candidate preferences are inferred by these commands.
 
 ### Online role sources
 

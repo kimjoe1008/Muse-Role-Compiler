@@ -504,6 +504,8 @@ def configure_search(preferences: dict[str, Any], values: dict[str, Any]) -> dic
         "seniority": "clear_seniority",
         "locations": "clear_locations",
         "work_arrangements": "clear_work_arrangements",
+        "remote_eligible_regions": "clear_remote_eligible_regions",
+        "excluded_companies": "clear_excluded_companies",
     }
     changes = {}
     for field, clear_flag in list_fields.items():
@@ -536,6 +538,23 @@ def configure_search(preferences: dict[str, Any], values: dict[str, Any]) -> dic
     elif values.get("clear_experience_limit"):
         search["max_required_years_experience"] = None
         changes["max_required_years_experience"] = None
+
+    graduation_start = values.get("graduation_start_year")
+    graduation_end = values.get("graduation_end_year")
+    clear_graduation = values.get("clear_graduation_window", False)
+    if clear_graduation and (graduation_start is not None or graduation_end is not None):
+        raise ValueError("Cannot set and clear the graduation window in the same command")
+    if (graduation_start is None) != (graduation_end is None):
+        raise ValueError("Set both graduation start and end years")
+    if graduation_start is not None:
+        if not (1900 <= graduation_start <= graduation_end <= 2100):
+            raise ValueError("Graduation years must be ordered values between 1900 and 2100")
+        window = {"start_year": graduation_start, "end_year": graduation_end}
+        search["graduation_window"] = window
+        changes["graduation_window"] = window
+    elif clear_graduation:
+        search["graduation_window"] = None
+        changes["graduation_window"] = None
 
     max_roles = values.get("max_roles_to_review_per_run")
     if max_roles is not None:
@@ -1093,11 +1112,18 @@ def command_parser() -> argparse.ArgumentParser:
     search_configure.add_argument("--work-arrangement", action="append", choices=("on_site", "hybrid", "remote"))
     search_configure.add_argument("--max-required-years", type=int)
     search_configure.add_argument("--max-roles", type=int)
+    search_configure.add_argument("--graduation-start-year", type=int)
+    search_configure.add_argument("--graduation-end-year", type=int)
     search_configure.add_argument("--clear-role-families", action="store_true")
     search_configure.add_argument("--clear-seniority", action="store_true")
     search_configure.add_argument("--clear-locations", action="store_true")
     search_configure.add_argument("--clear-work-arrangements", action="store_true")
+    search_configure.add_argument("--remote-eligible-region", action="append")
+    search_configure.add_argument("--clear-remote-eligible-regions", action="store_true")
+    search_configure.add_argument("--exclude-company", action="append")
+    search_configure.add_argument("--clear-excluded-companies", action="store_true")
     search_configure.add_argument("--clear-experience-limit", action="store_true")
+    search_configure.add_argument("--clear-graduation-window", action="store_true")
     source_status_command = commands.add_parser("source-status", help="Show scan health and tracked-role freshness per source")
     source_status_command.add_argument("--limit", type=int, default=100)
     ingest = commands.add_parser("ingest", help="Normalize a Muse-observed public job record from JSON")
@@ -1176,11 +1202,18 @@ def run(args: argparse.Namespace) -> int:
                 "work_arrangements": args.work_arrangement,
                 "max_required_years_experience": args.max_required_years,
                 "max_roles_to_review_per_run": args.max_roles,
+                "graduation_start_year": args.graduation_start_year,
+                "graduation_end_year": args.graduation_end_year,
                 "clear_role_families": args.clear_role_families,
                 "clear_seniority": args.clear_seniority,
                 "clear_locations": args.clear_locations,
                 "clear_work_arrangements": args.clear_work_arrangements,
+                "remote_eligible_regions": args.remote_eligible_region,
+                "clear_remote_eligible_regions": args.clear_remote_eligible_regions,
+                "excluded_companies": args.exclude_company,
+                "clear_excluded_companies": args.clear_excluded_companies,
                 "clear_experience_limit": args.clear_experience_limit,
+                "clear_graduation_window": args.clear_graduation_window,
             }
             result = configure_search(preferences, values)
             paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
