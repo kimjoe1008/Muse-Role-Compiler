@@ -98,6 +98,28 @@ class MuseRolesTests(unittest.TestCase):
         self.assertIsNone(summary["resume_sha256"])
         self.assertTrue(summary["missing"])
 
+    def test_source_cli_add_is_idempotent_and_remove_preserves_other_preferences(self):
+        result = self.cli(self.root, "source", "add", "ashby", "--tenant", "n1", "--company", "N1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["added"])
+
+        repeated = self.cli(self.root, "source", "add", "ashby", "--tenant", "n1", "--company", "N1")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertTrue(json.loads(repeated.stdout)["already_configured"])
+
+        preferences = json.loads(self.paths["preferences"].read_text(encoding="utf-8"))
+        preferences["search"]["locations"] = ["New York"]
+        self.paths["preferences"].write_text(json.dumps(preferences), encoding="utf-8")
+        listed = self.cli(self.root, "source", "list")
+        self.assertEqual(listed.returncode, 0, listed.stderr)
+        self.assertEqual(json.loads(listed.stdout)["sources"], [{"type": "ashby", "tenant": "n1", "company": "N1"}])
+
+        removed = self.cli(self.root, "source", "remove", "ashby", "--tenant", "n1")
+        self.assertEqual(removed.returncode, 0, removed.stderr)
+        updated = json.loads(self.paths["preferences"].read_text(encoding="utf-8"))
+        self.assertEqual(updated["search"]["enabled_sources"], [])
+        self.assertEqual(updated["search"]["locations"], ["New York"])
+
     def test_url_normalization_removes_tracking_but_keeps_requisition(self):
         url = muse_roles.normalize_url("https://jobs.example/role/?utm_source=mail&gh_jid=123#apply")
         self.assertEqual(url, "https://jobs.example/role?gh_jid=123")

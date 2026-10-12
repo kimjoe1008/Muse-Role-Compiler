@@ -448,6 +448,37 @@ def source_status(db: sqlite3.Connection, limit: int) -> list[dict[str, Any]]:
     return result[:limit]
 
 
+def configure_source(preferences: dict[str, Any], action: str, kind: str | None = None,
+                    tenant: str | None = None, company: str | None = None) -> dict[str, Any]:
+    supported = {"greenhouse", "lever", "ashby"}
+    if action == "list":
+        return {"sources": preferences.get("search", {}).get("enabled_sources", [])}
+    if kind not in supported:
+        raise ValueError("Source type must be greenhouse, lever, or ashby")
+    if not tenant or not re.fullmatch(r"[A-Za-z0-9_-]+", tenant):
+        raise ValueError("Tenant must be a board name containing only letters, numbers, '_' or '-'")
+    search = preferences.setdefault("search", {})
+    sources = search.setdefault("enabled_sources", [])
+    if not isinstance(sources, list):
+        raise ValueError("search.enabled_sources must be a list")
+    match = next((item for item in sources if item.get("type") == kind and item.get("tenant") == tenant), None)
+    if action == "add":
+        entry = {"type": kind, "tenant": tenant, "company": company or tenant}
+        if match:
+            if match.get("company", tenant) == entry["company"]:
+                return {"added": False, "already_configured": True, "source": match}
+            match["company"] = entry["company"]
+            return {"added": False, "updated": True, "source": match}
+        sources.append(entry)
+        return {"added": True, "source": entry}
+    if action == "remove":
+        if not match:
+            raise ValueError(f"Source {kind}:{tenant} is not configured")
+        sources.remove(match)
+        return {"removed": True, "source": match}
+    raise ValueError(f"Unsupported source action {action!r}")
+
+
 def infer_arrangement(location: str, value: str | None = None) -> str:
     text = f"{location} {value or ''}".lower()
     if "remote" in text or "work from home" in text:
@@ -971,7 +1002,17 @@ def command_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init", help="Create private config templates and SQLite state")
     commands.add_parser("inspect", help="Check private configuration and show resume hash")
-    commands.add_parser("discover", help="Query configured Greenhouse and Lever boards")
+    commands.add_parser("discover", help="Query configured Greenhouse, Lever, and Ashby boards")
+    source = commands.add_parser("source", help="Manage configured public job boards")
+    source_commands = source.add_subparsers(dest="source_command", required=True)
+    source_commands.add_parser("list", help="List configured public job boards")
+    source_add = source_commands.add_parser("add", help="Add or update a public job board")
+    source_add.add_argument("type", choices=("greenhouse", "lever", "ashby"))
+    source_add.add_argument("--tenant", required=True, help="Public board token, site name, or board name")
+    source_add.add_argument("--company", help="Display name; defaults to the board name")
+    source_remove = source_commands.add_parser("remove", help="Remove a configured public job board")
+    source_remove.add_argument("type", choices=("greenhouse", "lever", "ashby"))
+    source_remove.add_argument("--tenant", required=True)
     source_status_command = commands.add_parser("source-status", help="Show scan health and tracked-role freshness per source")
     source_status_command.add_argument("--limit", type=int, default=100)
     ingest = commands.add_parser("ingest", help="Normalize a Muse-observed public job record from JSON")
@@ -1027,6 +1068,18 @@ def run(args: argparse.Namespace) -> int:
 
     profile = read_json(paths["profile"])
     preferences = read_json(paths["preferences"])
+    if args.command == "source":
+        if args.source_command == "list":
+            result = configure_source(preferences, "list")
+        elif args.source_command == "add":
+            result = configure_source(preferences, "add", args.type, args.tenant, args.company)
+            if result.get("added") or result.get("updated"):
+                paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
+        else:
+            result = configure_source(preferences, "remove", args.type, args.tenant)
+            paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(result, indent=2))
+        return 0
     db = connect(paths["database"])
     try:
         if args.command == "discover":
