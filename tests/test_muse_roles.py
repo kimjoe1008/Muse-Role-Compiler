@@ -472,6 +472,31 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(listing.returncode, 0, listing.stderr)
         self.assertEqual(len(json.loads(listing.stdout)), 1)
 
+    def test_non_https_history_is_preserved_as_unmatchable_review_hint(self):
+        history_path = self.root / "history.csv"
+        with history_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
+            writer.writerow(["Software Engineer I", "Acme", "Seattle", "http://old.example/job", "APPLIED"])
+        db = muse_roles.connect(self.paths["database"])
+        summary = muse_roles.import_history_csv(db, history_path, "Simplify")
+        self.assertEqual((summary["rows"], summary["unique_urls"], summary["duplicate_url_rows"]), (1, 0, 0))
+        self.assertEqual(summary["unmatchable_url_rows"][0]["csv_line"], 2)
+
+        raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+               "url": "https://new.example/job", "description": ""}
+        self.assertEqual(muse_roles.classify_discovery_record(db, raw, "ashby", "acme"), "previously_seen")
+        job_id, included = muse_roles.save_record(db, raw, "ashby", "acme", self.profile, self.preferences)
+        self.assertTrue(included)
+        db.commit()
+        row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        hint = muse_roles.job_view(db, row)["possible_history_matches"][0]
+        self.assertEqual(hint["source_url"], "http://old.example/job")
+        self.assertIn("credential-free HTTPS", hint["url_error"])
+        self.assertEqual(hint["canonical_url"], "")
+        self.assertEqual(muse_roles.imported_history_for_url(db, raw["url"]), [])
+        db.close()
+
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])
         job = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle", "url": "https://jobs.example/role"}

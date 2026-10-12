@@ -134,6 +134,8 @@ def connect(path: Path) -> sqlite3.Connection:
             import_id INTEGER NOT NULL REFERENCES history_imports(import_id) ON DELETE CASCADE,
             row_number INTEGER NOT NULL,
             canonical_url TEXT NOT NULL,
+            source_url TEXT NOT NULL DEFAULT '',
+            url_error TEXT NOT NULL DEFAULT '',
             company TEXT NOT NULL,
             title TEXT NOT NULL,
             location TEXT NOT NULL,
@@ -206,6 +208,11 @@ def connect(path: Path) -> sqlite3.Connection:
         db.execute("ALTER TABLE decisions ADD COLUMN candidate_context_sha256 TEXT")
     if "approved_job_sha256" not in decision_columns:
         db.execute("ALTER TABLE decisions ADD COLUMN approved_job_sha256 TEXT")
+    history_columns = {row["name"] for row in db.execute("PRAGMA table_info(imported_history_rows)")}
+    if "source_url" not in history_columns:
+        db.execute("ALTER TABLE imported_history_rows ADD COLUMN source_url TEXT NOT NULL DEFAULT ''")
+    if "url_error" not in history_columns:
+        db.execute("ALTER TABLE imported_history_rows ADD COLUMN url_error TEXT NOT NULL DEFAULT ''")
     return db
 
 
@@ -297,12 +304,15 @@ def import_history_csv(db: sqlite3.Connection, path: Path, source: str) -> dict[
         status = values.get("Status", "").upper()
         if not company or not title or not status:
             raise ValueError(f"History CSV row {row_number} needs company, title, and status")
+        source_url = values.get("Job URL", "")
+        url_error = ""
         try:
-            canonical_url = normalize_url(values.get("Job URL", ""))
+            canonical_url = normalize_url(source_url)
         except ValueError as exc:
-            raise ValueError(f"History CSV row {row_number}: {exc}") from exc
+            canonical_url = ""
+            url_error = str(exc)
         rows.append((
-            row_number, canonical_url, company, title, values.get("Location", ""), status,
+            row_number, canonical_url, source_url, url_error, company, title, values.get("Location", ""), status,
             values.get("Applied Date", ""), values.get("Status Date", ""),
             values.get("Archived", ""), values.get("Notes", ""), values.get("job_type", ""),
         ))
@@ -323,16 +333,20 @@ def import_history_csv(db: sqlite3.Connection, path: Path, source: str) -> dict[
     import_id = cursor.lastrowid
     db.executemany(
         """INSERT INTO imported_history_rows(
-        import_id, row_number, canonical_url, company, title, location, status,
+        import_id, row_number, canonical_url, source_url, url_error, company, title, location, status,
         applied_date, status_date, archived, notes, job_type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         ((import_id, *row) for row in rows),
     )
     db.commit()
 
     urls: dict[str, dict[str, Any]] = {}
+    invalid_url_rows = []
     for row in rows:
-        _, url, company, title, _, status, *_ = row
+        row_number, url, _, url_error, company, title, _, status, *_ = row
+        if not url:
+            invalid_url_rows.append({"csv_line": row_number, "reason": url_error})
+            continue
         entry = urls.setdefault(url, {"company": company, "title": title, "statuses": set(), "count": 0})
         entry["statuses"].add(status)
         entry["count"] += 1
@@ -343,7 +357,9 @@ def import_history_csv(db: sqlite3.Connection, path: Path, source: str) -> dict[
     ]
     return {
         "source": source.strip(), "import_id": import_id, "rows": len(rows),
-        "unique_urls": len(urls), "duplicate_url_rows": len(rows) - len(urls),
+        "unique_urls": len(urls),
+        "duplicate_url_rows": len(rows) - len(invalid_url_rows) - len(urls),
+        "unmatchable_url_rows": invalid_url_rows,
         "status_conflicts": conflicts, "already_imported": False,
     }
 
@@ -367,7 +383,8 @@ def possible_history_matches(db: sqlite3.Connection, company: str, title: str,
                              location: str, url: str) -> list[dict[str, Any]]:
     return [dict(row) for row in db.execute(
         """SELECT imports.source, rows.company, rows.title, rows.location, rows.status,
-        rows.applied_date, rows.status_date, rows.canonical_url FROM imported_history_rows AS rows
+        rows.applied_date, rows.status_date, rows.canonical_url, rows.source_url, rows.url_error
+        FROM imported_history_rows AS rows
         JOIN history_imports AS imports ON imports.import_id=rows.import_id
         WHERE lower(trim(rows.company))=lower(trim(?))
         AND lower(trim(rows.title))=lower(trim(?))
@@ -597,6 +614,9 @@ def classify_discovery_record(db: sqlite3.Connection, raw: dict[str, Any], provi
     job_id = stable_id(record, db)
     existing = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
     history = imported_history_for_url(db, record["canonical_url"])
+    possible_history = possible_history_matches(
+        db, record["company"], record["title"], record["location"], record["canonical_url"]
+    ) if not history else []
     decision = current_decision(db, job_id) if existing else None
     attempt = latest_attempt(db, job_id) if existing else None
     history_statuses = {item["status"] for item in history}
@@ -609,7 +629,7 @@ def classify_discovery_record(db: sqlite3.Connection, raw: dict[str, Any], provi
     if resolved:
         return "resolved"
     if not existing:
-        return "previously_seen" if history else "new"
+        return "previously_seen" if history or possible_history else "new"
     comparable = ("company", "title", "location", "work_arrangement", "canonical_url", "description")
     if any(str(existing[key] or "") != str(record[key] or "") for key in comparable):
         return "changed"
