@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import io
 import json
 import re
 import sqlite3
@@ -121,6 +122,30 @@ def connect(path: Path) -> sqlite3.Connection:
             observed_at TEXT NOT NULL,
             PRIMARY KEY(job_id, source, source_url)
         );
+        CREATE TABLE IF NOT EXISTS history_imports (
+            import_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            content_sha256 TEXT NOT NULL,
+            imported_at TEXT NOT NULL,
+            row_count INTEGER NOT NULL,
+            UNIQUE(source, content_sha256)
+        );
+        CREATE TABLE IF NOT EXISTS imported_history_rows (
+            import_id INTEGER NOT NULL REFERENCES history_imports(import_id) ON DELETE CASCADE,
+            row_number INTEGER NOT NULL,
+            canonical_url TEXT NOT NULL,
+            company TEXT NOT NULL,
+            title TEXT NOT NULL,
+            location TEXT NOT NULL,
+            status TEXT NOT NULL,
+            applied_date TEXT NOT NULL,
+            status_date TEXT NOT NULL,
+            archived TEXT NOT NULL,
+            notes TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            PRIMARY KEY(import_id, row_number)
+        );
+        CREATE INDEX IF NOT EXISTS imported_history_url ON imported_history_rows(canonical_url);
         CREATE TABLE IF NOT EXISTS decisions (
             decision_id INTEGER PRIMARY KEY AUTOINCREMENT,
             job_id TEXT NOT NULL REFERENCES jobs(job_id),
@@ -245,6 +270,106 @@ def normalize_url(url: str) -> str:
     if parsed.port and parsed.port != 443:
         host = f"{host}:{parsed.port}"
     return urllib.parse.urlunsplit(("https", host, path, urllib.parse.urlencode(query), ""))
+
+
+def import_history_csv(db: sqlite3.Connection, path: Path, source: str) -> dict[str, Any]:
+    if not source.strip():
+        raise ValueError("History source name cannot be empty")
+    try:
+        content = path.read_bytes()
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"History CSV must be UTF-8 encoded: {exc}") from exc
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    required = {"Job Title", "Company Name", "Location", "Job URL", "Status"}
+    headers = set(reader.fieldnames or ())
+    missing = sorted(required - headers)
+    if missing:
+        raise ValueError("History CSV is missing required columns: " + ", ".join(missing))
+
+    rows = []
+    for row_number, raw in enumerate(reader, start=2):
+        values = {str(key): str(value or "").strip() for key, value in raw.items() if key is not None}
+        if not any(values.values()):
+            continue
+        company = values.get("Company Name", "")
+        title = values.get("Job Title", "")
+        status = values.get("Status", "").upper()
+        if not company or not title or not status:
+            raise ValueError(f"History CSV row {row_number} needs company, title, and status")
+        try:
+            canonical_url = normalize_url(values.get("Job URL", ""))
+        except ValueError as exc:
+            raise ValueError(f"History CSV row {row_number}: {exc}") from exc
+        rows.append((
+            row_number, canonical_url, company, title, values.get("Location", ""), status,
+            values.get("Applied Date", ""), values.get("Status Date", ""),
+            values.get("Archived", ""), values.get("Notes", ""), values.get("job_type", ""),
+        ))
+
+    content_hash = hashlib.sha256(content).hexdigest()
+    existing = db.execute(
+        "SELECT import_id, row_count FROM history_imports WHERE source=? AND content_sha256=?",
+        (source.strip(), content_hash),
+    ).fetchone()
+    if existing:
+        return {"source": source.strip(), "import_id": existing["import_id"],
+                "rows": existing["row_count"], "already_imported": True}
+
+    cursor = db.execute(
+        "INSERT INTO history_imports(source, content_sha256, imported_at, row_count) VALUES (?, ?, ?, ?)",
+        (source.strip(), content_hash, now(), len(rows)),
+    )
+    import_id = cursor.lastrowid
+    db.executemany(
+        """INSERT INTO imported_history_rows(
+        import_id, row_number, canonical_url, company, title, location, status,
+        applied_date, status_date, archived, notes, job_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        ((import_id, *row) for row in rows),
+    )
+    db.commit()
+
+    urls: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        _, url, company, title, _, status, *_ = row
+        entry = urls.setdefault(url, {"company": company, "title": title, "statuses": set(), "count": 0})
+        entry["statuses"].add(status)
+        entry["count"] += 1
+    conflicts = [
+        {"url": url, "company": item["company"], "title": item["title"],
+         "statuses": sorted(item["statuses"]), "rows": item["count"]}
+        for url, item in urls.items() if len(item["statuses"]) > 1
+    ]
+    return {
+        "source": source.strip(), "import_id": import_id, "rows": len(rows),
+        "unique_urls": len(urls), "duplicate_url_rows": len(rows) - len(urls),
+        "status_conflicts": conflicts, "already_imported": False,
+    }
+
+
+def imported_history_for_url(db: sqlite3.Connection, url: str) -> list[dict[str, Any]]:
+    return [dict(row) for row in db.execute(
+        """SELECT imports.source, rows.status, rows.applied_date, rows.status_date,
+        rows.archived, rows.notes FROM imported_history_rows AS rows
+        JOIN history_imports AS imports ON imports.import_id=rows.import_id
+        WHERE rows.canonical_url=? AND imports.import_id=(
+            SELECT MAX(latest.import_id) FROM history_imports AS latest
+            WHERE latest.source=imports.source
+        ) ORDER BY imports.source, rows.row_number""",
+        (normalize_url(url),),
+    )]
+
+
+def history_requires_reconciliation(history: list[dict[str, Any]]) -> str | None:
+    if not history:
+        return None
+    statuses = sorted({item["status"] for item in history})
+    if len(statuses) > 1:
+        return "Imported history has conflicting statuses: " + ", ".join(statuses)
+    if statuses[0] in {"APPLIED", "SCREENING", "INTERVIEWING", "REJECTED", "WITHDRAWN"}:
+        return f"Imported history reports {statuses[0]}; reconcile this prior application before proceeding"
+    return None
 
 
 def infer_arrangement(location: str, value: str | None = None) -> str:
@@ -556,6 +681,11 @@ def preflight(db: sqlite3.Connection, root: Path, job_id: str, destination: str 
             errors.append(f"Attempt {prior['attempt_id']} is {prior['state']}; resume or reconcile it instead of starting another")
         elif not allow_closed:
             errors.append("The previous attempt is CLOSED; start a new attempt with --reason only after explicit user direction")
+    history_issue = history_requires_reconciliation(
+        imported_history_for_url(db, str(job["canonical_url"]))
+    )
+    if history_issue:
+        errors.append(history_issue)
     review_items = json.loads(job["blockers"])
     state = "BLOCKED" if errors else "NEEDS_HUMAN" if review_items else "READY"
     return {
@@ -699,6 +829,7 @@ def job_view(db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         "url": row["canonical_url"], "fit_evidence": json.loads(row["fit_evidence"]),
         "blockers": json.loads(row["blockers"]), "sources": sources,
         "possible_duplicate_ids": sorted(possible_duplicates),
+        "imported_history": imported_history_for_url(db, str(row["canonical_url"])),
         "decision": decision["status"] if decision else "PENDING",
         "application_state": attempt["state"] if attempt else "NOT_STARTED",
         "attempt_id": attempt["attempt_id"] if attempt else None,
@@ -722,8 +853,14 @@ def command_parser() -> argparse.ArgumentParser:
     commands.add_parser("discover", help="Query configured Greenhouse and Lever boards")
     ingest = commands.add_parser("ingest", help="Normalize a Muse-observed public job record from JSON")
     ingest.add_argument("--file", type=Path, help="JSON file; omit to read one JSON object from stdin")
+    history = commands.add_parser("history", help="Import external role and application history")
+    history_commands = history.add_subparsers(dest="history_command", required=True)
+    history_import = history_commands.add_parser("import", help="Import a CSV history snapshot idempotently")
+    history_import.add_argument("file", type=Path, help="CSV file to import")
+    history_import.add_argument("--source", help="History source label; defaults to the filename stem")
     listing = commands.add_parser("list", help="List filtered roles")
     listing.add_argument("--limit", type=int, default=100)
+    listing.add_argument("--include-history", action="store_true", help="Include roles with imported prior outcomes")
     show = commands.add_parser("show", help="Show one role and its source provenance")
     show.add_argument("job_id")
     decide = commands.add_parser("decide", help="Record an exact-ID approve, skip, defer, or revoke decision")
@@ -785,15 +922,43 @@ def run(args: argparse.Namespace) -> int:
                 sources_left -= 1
                 try:
                     records, kind, source_url = discover_source(source)
+                    selected = []
+                    selected_ids = set()
+                    eligible_records = 0
+                    history_suppressed = 0
+                    already_tracked = 0
+                    for record in records:
+                        normalized = canonical_record(record, kind, str(source["tenant"]), source_url)
+                        if history_requires_reconciliation(
+                            imported_history_for_url(db, normalized["canonical_url"])
+                        ):
+                            history_suppressed += 1
+                            continue
+                        include, _, _ = evaluate(normalized, profile, preferences)
+                        if include:
+                            eligible_records += 1
+                            job_id = stable_id(normalized, db)
+                            exists = db.execute("SELECT 1 FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+                            if exists:
+                                save_record(db, record, kind, str(source["tenant"]), profile, preferences, source_url)
+                                already_tracked += 1
+                            elif job_id not in selected_ids and len(selected) < quota:
+                                selected.append(record)
+                                selected_ids.add(job_id)
                     saved = 0
-                    considered = min(len(records), quota)
-                    for record in records[:considered]:
+                    for record in selected:
                         job_id, included = save_record(db, record, kind, str(source["tenant"]), profile, preferences, source_url)
                         saved += int(included and bool(job_id))
-                    remaining -= considered
+                    remaining -= saved
                     db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
-                               (label, started, "OK", f"received={len(records)} considered={considered} saved={saved}"))
-                    result.append({"source": label, "status": "OK", "received": len(records), "saved": saved})
+                               (label, started, "OK",
+                                          f"received={len(records)} scanned={len(records)} eligible={eligible_records} "
+                                f"already_tracked={already_tracked} history_suppressed={history_suppressed} "
+                                f"new_saved={saved}"))
+                    result.append({"source": label, "status": "OK", "received": len(records),
+                                              "scanned": len(records), "eligible": eligible_records,
+                                   "already_tracked": already_tracked,
+                                   "history_suppressed": history_suppressed, "saved": saved})
                 except (ValueError, KeyError, TypeError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
                     db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
                                (label, started, "FAILED", str(exc)[:500]))
@@ -801,6 +966,11 @@ def run(args: argparse.Namespace) -> int:
             db.commit()
             print(json.dumps(result, indent=2))
             return 0 if any(item["status"] == "OK" for item in result) else 1
+        if args.command == "history":
+            input_path = args.file if args.file.is_absolute() else root / args.file
+            result = import_history_csv(db, input_path.resolve(), args.source or input_path.stem)
+            print(json.dumps(result, indent=2))
+            return 0
         if args.command == "ingest":
             if args.file:
                 input_path = args.file.resolve() if args.file.is_absolute() else (root / args.file).resolve()
@@ -825,7 +995,12 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "list":
             if args.limit < 1:
                 raise ValueError("--limit must be positive")
-            rows = db.execute("SELECT * FROM jobs ORDER BY last_seen DESC LIMIT ?", (args.limit,)).fetchall()
+            rows = db.execute("SELECT * FROM jobs ORDER BY last_seen DESC").fetchall()
+            if not args.include_history:
+                rows = [row for row in rows if not history_requires_reconciliation(
+                    imported_history_for_url(db, str(row["canonical_url"]))
+                )]
+            rows = rows[:args.limit]
             print(json.dumps([job_view(db, row) for row in rows], indent=2))
             return 0
         if args.command == "show":

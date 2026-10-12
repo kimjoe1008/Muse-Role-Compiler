@@ -8,3 +8,4 @@ project-docs/docs/PROMPTS.md
 project-docs/docs/PROGRESS.md
 project-docs/docs/ARCHITECTURE.md
 project-docs/AGENTS.md
+*.csv

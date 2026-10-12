@@ -214,7 +214,53 @@ class MuseRolesTests(unittest.TestCase):
         runs = db.execute("SELECT result, detail FROM source_runs ORDER BY run_id").fetchall()
         db.close()
         self.assertEqual([row["result"] for row in runs], ["OK", "OK"])
-        self.assertIn("considered=1", runs[1]["detail"])
+        self.assertIn("scanned=1", runs[1]["detail"])
+
+    def test_discovery_scans_past_irrelevant_feed_prefix_within_shortlist_limit(self):
+        self.preferences["search"]["enabled_sources"] = [{"type": "greenhouse", "tenant": "acme"}]
+        self.preferences["search"]["max_roles_to_review_per_run"] = 1
+        self.paths["preferences"].write_text(json.dumps(self.preferences), encoding="utf-8")
+        records = [
+            {"id": f"other-{index}", "company": "Acme", "title": "Marketing Manager", "location": "Seattle",
+             "url": f"https://jobs.example/other-{index}", "description": ""}
+            for index in range(4)
+        ]
+        history_path = self.root / "history.csv"
+        with history_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
+            writer.writerow(["Software Engineer I", "Acme", "Seattle", "https://jobs.example/swe-1", "APPLIED"])
+        db = muse_roles.connect(self.paths["database"])
+        muse_roles.import_history_csv(db, history_path, "Simplify")
+        db.close()
+        records.append({"id": "swe-1", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+                        "url": "https://jobs.example/swe-1", "description": ""})
+        records.append({"id": "swe-2", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+                        "url": "https://jobs.example/swe-2", "description": ""})
+        args = argparse.Namespace(command="discover", root=self.root)
+        with patch.object(muse_roles, "discover_source", return_value=(records, "greenhouse", "https://boards-api.greenhouse.io/feed")), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(muse_roles.run(args), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual((result[0]["received"], result[0]["scanned"], result[0]["eligible"],
+                  result[0]["history_suppressed"], result[0]["saved"]), (6, 6, 1, 1, 1))
+        db = muse_roles.connect(self.paths["database"])
+        saved_urls = [row["canonical_url"] for row in db.execute("SELECT canonical_url FROM jobs")]
+        self.assertEqual(saved_urls, ["https://jobs.example/swe-2"])
+        db.close()
+
+        repeated_records = [
+            {"id": "swe-2", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+             "url": "https://jobs.example/swe-2", "description": ""},
+            {"id": "swe-3", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+             "url": "https://jobs.example/swe-3", "description": ""},
+        ]
+        with patch.object(muse_roles, "discover_source", return_value=(repeated_records, "greenhouse", "https://boards-api.greenhouse.io/feed")), contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(muse_roles.run(args), 0)
+        repeated_result = json.loads(output.getvalue())[0]
+        self.assertEqual((repeated_result["already_tracked"], repeated_result["saved"]), (1, 1))
+        db = muse_roles.connect(self.paths["database"])
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 2)
+        db.close()
 
     def test_discovery_keeps_a_source_failure_when_another_source_succeeds(self):
         self.preferences["search"]["enabled_sources"] = [
@@ -260,6 +306,55 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(row["decision"], "REVOKED")
         self.assertEqual(row["company"], "'=1+1")
         self.assertEqual(row["application_state"], "NOT_STARTED")
+
+    def test_csv_history_import_is_idempotent_and_not_application_evidence(self):
+        history_path = self.root / "simplify.csv"
+        headers = ["Job Title", "Company Name", "Location", "Job URL", "Applied Date",
+                   "Status", "Status Date", "Archived", "Date Archived", "Notes", "job_type"]
+        records = [
+            ["Software Engineer I", "Acme", "Seattle", "https://jobs.example/role?utm_source=feed",
+             "2026-10-01", "APPLIED", "2026-10-01", "No", "", "", "Full-time"],
+            ["Software Engineer I", "Acme", "Seattle", "https://jobs.example/role",
+             "", "SAVED", "2026-10-02", "No", "", "", "Full-time"],
+            ["Engineer I", "Other", "Seattle", "https://jobs.example/other",
+             "", "SAVED", "2026-10-02", "No", "", "", "Full-time"],
+        ]
+        with history_path.open("w", encoding="utf-8-sig", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(headers)
+            writer.writerows(records)
+
+        first = self.cli(self.root, "history", "import", str(history_path), "--source", "Simplify")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        summary = json.loads(first.stdout)
+        self.assertEqual((summary["rows"], summary["unique_urls"], summary["duplicate_url_rows"]), (3, 2, 1))
+        self.assertEqual(summary["status_conflicts"][0]["statuses"], ["APPLIED", "SAVED"])
+
+        repeated = self.cli(self.root, "history", "import", str(history_path), "--source", "Simplify")
+        self.assertEqual(repeated.returncode, 0, repeated.stderr)
+        self.assertTrue(json.loads(repeated.stdout)["already_imported"])
+
+        db = muse_roles.connect(self.paths["database"])
+        raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+               "url": "https://jobs.example/role", "description": ""}
+        job_id, included = muse_roles.save_record(db, raw, "muse", "observed", self.profile, self.preferences)
+        self.assertTrue(included)
+        job = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        view = muse_roles.job_view(db, job)
+        self.assertEqual(view["application_state"], "NOT_STARTED")
+        self.assertEqual({item["status"] for item in view["imported_history"]}, {"APPLIED", "SAVED"})
+        self.assertIn("conflicting statuses", muse_roles.history_requires_reconciliation(view["imported_history"]))
+        preflight = muse_roles.preflight(db, self.root, job_id)
+        self.assertTrue(any("conflicting statuses" in reason for reason in preflight["reasons"]))
+        db.commit()
+        db.close()
+
+        default_list = self.cli(self.root, "list")
+        self.assertEqual(default_list.returncode, 0, default_list.stderr)
+        self.assertEqual(json.loads(default_list.stdout), [])
+        full_list = self.cli(self.root, "list", "--include-history")
+        self.assertEqual(full_list.returncode, 0, full_list.stderr)
+        self.assertEqual(len(json.loads(full_list.stdout)), 1)
 
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])

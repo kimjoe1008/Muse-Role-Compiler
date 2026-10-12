@@ -17,7 +17,7 @@ This supersedes conflicting standalone-runtime requirements. It does not claim t
 | R3 | Deduplicate verified role identities across sources while preserving provenance and distinct requisitions |
 | R4 | Persist a searchable role history, including imported prior application outcomes, and avoid resurfacing unchanged resolved roles |
 | R5 | Present new and materially changed roles with fit evidence, source coverage, and visible blockers |
-| R6 | Import and export tracker data safely and idempotently; imported data never authorizes applications |
+| R6 | Import external history idempotently and export tracker data safely; imported data never authorizes applications |
 | R7 | Keep application support optional; require explicit exact-role approval before any candidate data is entered or submitted |
 | R8 | If application support is used, rely only on confirmed facts and the user's answer policy, pausing for unknown or consequential answers |
 | R9 | Flag suspicious page instructions and legitimate AI restrictions; use appropriate human handoff |
