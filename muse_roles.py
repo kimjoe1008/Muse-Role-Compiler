@@ -479,6 +479,58 @@ def configure_source(preferences: dict[str, Any], action: str, kind: str | None 
     raise ValueError(f"Unsupported source action {action!r}")
 
 
+def configure_search(preferences: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
+    search = preferences.setdefault("search", {})
+    list_fields = {
+        "role_families": "clear_role_families",
+        "seniority": "clear_seniority",
+        "locations": "clear_locations",
+        "work_arrangements": "clear_work_arrangements",
+    }
+    changes = {}
+    for field, clear_flag in list_fields.items():
+        value = values.get(field)
+        if value is not None and values.get(clear_flag):
+            raise ValueError(f"Cannot set and clear search.{field} in the same command")
+        if value is not None:
+            normalized = []
+            seen = set()
+            for item in value:
+                text = str(item).strip()
+                key = text.casefold()
+                if text and key not in seen:
+                    normalized.append(text)
+                    seen.add(key)
+            search[field] = normalized
+            changes[field] = normalized
+        elif values.get(clear_flag):
+            search[field] = []
+            changes[field] = []
+
+    maximum_years = values.get("max_required_years_experience")
+    if maximum_years is not None and values.get("clear_experience_limit"):
+        raise ValueError("Cannot set and clear the experience limit in the same command")
+    if maximum_years is not None:
+        if maximum_years < 0:
+            raise ValueError("Maximum required experience must be non-negative")
+        search["max_required_years_experience"] = maximum_years
+        changes["max_required_years_experience"] = maximum_years
+    elif values.get("clear_experience_limit"):
+        search["max_required_years_experience"] = None
+        changes["max_required_years_experience"] = None
+
+    max_roles = values.get("max_roles_to_review_per_run")
+    if max_roles is not None:
+        if max_roles < 1:
+            raise ValueError("Maximum roles to review per run must be positive")
+        search["max_roles_to_review_per_run"] = max_roles
+        changes["max_roles_to_review_per_run"] = max_roles
+
+    if not changes:
+        raise ValueError("Specify at least one search preference to change")
+    return {"updated": changes, "search": search}
+
+
 def infer_arrangement(location: str, value: str | None = None) -> str:
     text = f"{location} {value or ''}".lower()
     if "remote" in text or "work from home" in text:
@@ -1013,6 +1065,21 @@ def command_parser() -> argparse.ArgumentParser:
     source_remove = source_commands.add_parser("remove", help="Remove a configured public job board")
     source_remove.add_argument("type", choices=("greenhouse", "lever", "ashby"))
     source_remove.add_argument("--tenant", required=True)
+    search_command = commands.add_parser("search", help="Inspect or configure role discovery preferences")
+    search_commands = search_command.add_subparsers(dest="search_command", required=True)
+    search_commands.add_parser("show", help="Show configured role discovery preferences")
+    search_configure = search_commands.add_parser("configure", help="Update explicitly supplied role search preferences")
+    search_configure.add_argument("--role-family", action="append")
+    search_configure.add_argument("--seniority", action="append", choices=("entry_level", "new_grad"))
+    search_configure.add_argument("--location", action="append")
+    search_configure.add_argument("--work-arrangement", action="append", choices=("on_site", "hybrid", "remote"))
+    search_configure.add_argument("--max-required-years", type=int)
+    search_configure.add_argument("--max-roles", type=int)
+    search_configure.add_argument("--clear-role-families", action="store_true")
+    search_configure.add_argument("--clear-seniority", action="store_true")
+    search_configure.add_argument("--clear-locations", action="store_true")
+    search_configure.add_argument("--clear-work-arrangements", action="store_true")
+    search_configure.add_argument("--clear-experience-limit", action="store_true")
     source_status_command = commands.add_parser("source-status", help="Show scan health and tracked-role freshness per source")
     source_status_command.add_argument("--limit", type=int, default=100)
     ingest = commands.add_parser("ingest", help="Normalize a Muse-observed public job record from JSON")
@@ -1077,6 +1144,27 @@ def run(args: argparse.Namespace) -> int:
                 paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
         else:
             result = configure_source(preferences, "remove", args.type, args.tenant)
+            paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
+        print(json.dumps(result, indent=2))
+        return 0
+    if args.command == "search":
+        if args.search_command == "show":
+            result = {"search": preferences.get("search", {})}
+        else:
+            values = {
+                "role_families": args.role_family,
+                "seniority": args.seniority,
+                "locations": args.location,
+                "work_arrangements": args.work_arrangement,
+                "max_required_years_experience": args.max_required_years,
+                "max_roles_to_review_per_run": args.max_roles,
+                "clear_role_families": args.clear_role_families,
+                "clear_seniority": args.clear_seniority,
+                "clear_locations": args.clear_locations,
+                "clear_work_arrangements": args.clear_work_arrangements,
+                "clear_experience_limit": args.clear_experience_limit,
+            }
+            result = configure_search(preferences, values)
             paths["preferences"].write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
         print(json.dumps(result, indent=2))
         return 0

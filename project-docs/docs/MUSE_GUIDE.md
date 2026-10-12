@@ -22,6 +22,7 @@ Tested on Windows with Python 3.12.6 on 2026-10-09. The helper uses only the Pyt
 | Initialize private templates and SQLite | `python muse_roles.py init` | PASS in a temporary root |
 | Inspect setup and resume SHA-256 | `python muse_roles.py inspect` | PASS in synthetic CLI test; no real resume used |
 | Manage configured boards | `python muse_roles.py source list`; `source add ashby --tenant board-name --company Employer`; `source remove ashby --tenant board-name` | PASS in synthetic CLI test; repeated adds are no-ops |
+| Show/configure search preferences | `python muse_roles.py search show`; `search configure --role-family "Software Engineer" --location "New York"` | PASS in synthetic CLI test; only explicit fields change |
 | Discover configured Greenhouse/Lever/Ashby boards | `python muse_roles.py discover` | Mocked adapter tests PASS; bounded live Greenhouse/Lever run reported two HTTP 200 feeds and zero title-filter matches; Ashby endpoint separately observed live |
 | Review source freshness | `python muse_roles.py source-status` | Reports latest status, last successful scan, tracked role count, and last role-seen timestamp per source |
 | Ingest a Muse-observed posting | `python muse_roles.py ingest` with one JSON object on stdin | PASS in synthetic CLI test |
@@ -36,6 +37,8 @@ Tested on Windows with Python 3.12.6 on 2026-10-09. The helper uses only the Pyt
 Private files are created under `private/`: `config/profile.json`, `config/preferences.json`, `config/answers.md`, the single configured resume (default `private/resume.pdf`), `state/roles.sqlite3`, and `exports/roles.csv`. Imported history is stored in the private SQLite database. The root `.gitignore` excludes `/private/`. `init` never overwrites existing private config. `inspect` prints the resume hash and missing setup items, not profile values.
 
 Use `source add` and `source remove` to change only `search.enabled_sources`; these commands preserve the rest of private preferences. They do not select role families, locations, or candidate details. Review configured boards with `python muse_roles.py source list` before discovery.
+
+Use `python muse_roles.py search show` to inspect current search settings. `search configure` replaces only fields supplied on the command, preserving other filters and sources. Repeat list options for multiple values, such as `--role-family "Software Engineer" --role-family "Product Manager"`. Use `--clear-locations`, `--clear-role-families`, `--clear-seniority`, or `--clear-work-arrangements` to explicitly empty those lists; `--clear-experience-limit` sets the required-years limit to null. `--max-required-years 0` is a valid explicit setting. No candidate preferences are inferred by these commands.
 
 ### Online role sources
 

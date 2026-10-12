@@ -120,6 +120,31 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(updated["search"]["enabled_sources"], [])
         self.assertEqual(updated["search"]["locations"], ["New York"])
 
+    def test_search_configure_updates_only_requested_fields_and_can_clear(self):
+        self.cli(self.root, "source", "add", "ashby", "--tenant", "n1")
+        configured = self.cli(
+            self.root, "search", "configure", "--role-family", "Software Engineer",
+            "--role-family", "Product Manager", "--location", "New York",
+            "--work-arrangement", "hybrid", "--max-required-years", "0", "--max-roles", "25",
+        )
+        self.assertEqual(configured.returncode, 0, configured.stderr)
+        preferences = json.loads(self.paths["preferences"].read_text(encoding="utf-8"))
+        search = preferences["search"]
+        self.assertEqual(search["role_families"], ["Software Engineer", "Product Manager"])
+        self.assertEqual(search["locations"], ["New York"])
+        self.assertEqual(search["work_arrangements"], ["hybrid"])
+        self.assertEqual(search["max_required_years_experience"], 0)
+        self.assertEqual(search["max_roles_to_review_per_run"], 25)
+        self.assertEqual(search["enabled_sources"], [{"type": "ashby", "tenant": "n1", "company": "n1"}])
+        self.assertEqual(search["seniority"], ["entry_level", "new_grad"])
+
+        cleared = self.cli(self.root, "search", "configure", "--clear-role-families", "--clear-experience-limit")
+        self.assertEqual(cleared.returncode, 0, cleared.stderr)
+        updated = json.loads(self.paths["preferences"].read_text(encoding="utf-8"))["search"]
+        self.assertEqual(updated["role_families"], [])
+        self.assertIsNone(updated["max_required_years_experience"])
+        self.assertEqual(updated["enabled_sources"], search["enabled_sources"])
+
     def test_url_normalization_removes_tracking_but_keeps_requisition(self):
         url = muse_roles.normalize_url("https://jobs.example/role/?utm_source=mail&gh_jid=123#apply")
         self.assertEqual(url, "https://jobs.example/role?gh_jid=123")
