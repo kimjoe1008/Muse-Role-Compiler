@@ -14,7 +14,7 @@ Test the behavior being changed. Reuse current tests and fixtures; do not build 
 | Filters | Required versus preferred experience, geographic/remote restrictions, and unknown eligibility behave as configured |
 | Approval | Exact selection persists; absent/revoked approval, changed resume/context/policy/posting/destination cannot permit an attempt |
 | Recovery | Existing applied/active/unknown attempts block duplicate starts; SUBMITTING cannot be treated as a known failure; possible submit is not retried |
-| CSV | Expected columns and current attempt outcome are present; formula-like external values are neutralized; export never changes approval |
+| CSV | Tracked and history-only rows are exported with explicit record type, source status/date, and internal application state kept separate; formula-like external values are neutralized; export never changes approval |
 | Migration | Additive migration preserves old decisions and adds attempt history without rewriting job IDs or decisions |
 
 Run only the applicable migration check if migration changes. Retain required repository gates; do not use historic Windows sandbox tests as Muse acceptance criteria.

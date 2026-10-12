@@ -379,6 +379,24 @@ def imported_history_for_url(db: sqlite3.Connection, url: str) -> list[dict[str,
     )]
 
 
+def current_imported_history_rows(db: sqlite3.Connection) -> list[dict[str, Any]]:
+    return [dict(row) for row in db.execute(
+        """SELECT imports.source, imports.imported_at, rows.*
+        FROM imported_history_rows AS rows
+        JOIN history_imports AS imports ON imports.import_id=rows.import_id
+        WHERE rows.import_id=(
+            SELECT MAX(latest.import_id)
+            FROM imported_history_rows AS latest_rows
+            JOIN history_imports AS latest ON latest.import_id=latest_rows.import_id
+            WHERE latest.source=imports.source AND (
+                (rows.canonical_url<>'' AND latest_rows.canonical_url=rows.canonical_url)
+                OR (rows.canonical_url='' AND latest_rows.canonical_url=''
+                    AND latest_rows.source_url=rows.source_url)
+            )
+        ) ORDER BY rows.company, rows.title, rows.row_number"""
+    )]
+
+
 def possible_history_matches(db: sqlite3.Connection, company: str, title: str,
                              location: str, url: str) -> list[dict[str, Any]]:
     return [dict(row) for row in db.execute(
@@ -1350,24 +1368,54 @@ def run(args: argparse.Namespace) -> int:
                 raise ValueError("CSV output must stay inside private/")
             output.parent.mkdir(parents=True, exist_ok=True)
             rows = db.execute("SELECT * FROM jobs ORDER BY company, title, job_id").fetchall()
+            history_rows = current_imported_history_rows(db)
+            history_by_url: dict[str, list[dict[str, Any]]] = {}
+            for history in history_rows:
+                if history["canonical_url"]:
+                    history_by_url.setdefault(history["canonical_url"], []).append(history)
+            tracked_urls = {str(row["canonical_url"]) for row in rows}
             with output.open("w", encoding="utf-8-sig", newline="") as stream:
-                writer = csv.DictWriter(stream, fieldnames=("job_id", "company", "title", "location", "url", "decision", "application_state", "applied_at", "notes"))
+                fieldnames = ("record_type", "job_id", "company", "title", "location", "url",
+                              "decision", "application_state", "applied_at", "history_status",
+                              "history_source", "history_applied_date", "notes")
+                writer = csv.DictWriter(stream, fieldnames=fieldnames)
                 writer.writeheader()
                 for row in rows:
                     view = job_view(db, row)
                     attempt = latest_attempt(db, str(row["job_id"]))
+                    imported = history_by_url.get(str(row["canonical_url"]), [])
                     notes = view["blockers"]
                     if attempt:
                         notes.extend(value for value in (attempt["blocker"], attempt["resolution"], attempt["evidence"]) if value)
                     writer.writerow({
+                        "record_type": "TRACKED_ROLE",
                         "job_id": csv_safe(view["job_id"]), "company": csv_safe(view["company"]),
                         "title": csv_safe(view["title"]), "location": csv_safe(view["location"]),
                         "url": csv_safe(view["url"]), "decision": csv_safe(view["decision"]),
                         "application_state": attempt["state"] if attempt else "NOT_STARTED",
                         "applied_at": attempt["updated_at"] if attempt and attempt["state"] == "APPLIED" else "",
+                        "history_status": csv_safe(" | ".join(sorted({item["status"] for item in imported}))),
+                        "history_source": csv_safe(" | ".join(sorted({item["source"] for item in imported}))),
+                        "history_applied_date": csv_safe(" | ".join(sorted({item["applied_date"] for item in imported if item["applied_date"]}))),
                         "notes": csv_safe("; ".join(notes)),
                     })
-            print(json.dumps({"exported": str(output.relative_to(root)), "rows": len(rows)}))
+                history_only = [item for item in history_rows if not item["canonical_url"] or item["canonical_url"] not in tracked_urls]
+                for item in history_only:
+                    notes = [value for value in (item["notes"], item["url_error"]) if value]
+                    writer.writerow({
+                        "record_type": "IMPORTED_HISTORY", "job_id": "",
+                        "company": csv_safe(item["company"]), "title": csv_safe(item["title"]),
+                        "location": csv_safe(item["location"]),
+                        "url": csv_safe(item["canonical_url"] or item["source_url"]),
+                        "decision": "NONE", "application_state": "HISTORY_ONLY", "applied_at": "",
+                        "history_status": csv_safe(item["status"]),
+                        "history_source": csv_safe(item["source"]),
+                        "history_applied_date": csv_safe(item["applied_date"]),
+                        "notes": csv_safe("; ".join(notes)),
+                    })
+            print(json.dumps({"exported": str(output.relative_to(root)),
+                              "tracked_roles": len(rows), "history_only_rows": len(history_only),
+                              "rows": len(rows) + len(history_only)}))
             return 0
     finally:
         db.close()

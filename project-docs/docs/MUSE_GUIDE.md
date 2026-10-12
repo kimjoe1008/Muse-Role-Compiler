@@ -32,7 +32,7 @@ Tested on Windows with Python 3.12.6 on 2026-10-09. The helper uses only the Pyt
 | Preflight | `python muse_roles.py preflight J-...` | PASS in synthetic tests; advisory only |
 | Start/pause/update/show attempt | `python muse_roles.py attempt start J-...`; `attempt update ID --state ...`; `attempt show ID` | PASS in synthetic tests; no browser side effects |
 | Record outcome with evidence | `python muse_roles.py attempt update ID --state APPLIED --evidence "..." --evidence-source job_confirmation` | PASS in synthetic tests; evidence required |
-| Export CSV | `python muse_roles.py export` | PASS; includes tracked application state/date; formula-like cells neutralized |
+| Export CSV | `python muse_roles.py export` | Includes tracked roles and imported history-only rows with source/status; formula-like cells neutralized; import never changes internal application state |
 
 Private files are created under `private/`: `config/profile.json`, `config/preferences.json`, `config/answers.md`, the single configured resume (default `private/resume.pdf`), `state/roles.sqlite3`, and `exports/roles.csv`. Imported history is stored in the private SQLite database. The root `.gitignore` excludes `/private/`. `init` never overwrites existing private config. `inspect` prints the resume hash and missing setup items, not profile values.
 

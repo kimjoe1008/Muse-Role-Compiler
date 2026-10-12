@@ -472,6 +472,18 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(full_list.returncode, 0, full_list.stderr)
         self.assertEqual(len(json.loads(full_list.stdout)), 1)
 
+        exported = self.cli(self.root, "export")
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        with (self.paths["exports"] / "roles.csv").open(encoding="utf-8-sig", newline="") as stream:
+            exported_rows = list(csv.DictReader(stream))
+        self.assertEqual(len(exported_rows), 2)
+        tracked = next(row for row in exported_rows if row["record_type"] == "TRACKED_ROLE")
+        history_only = next(row for row in exported_rows if row["record_type"] == "IMPORTED_HISTORY")
+        self.assertEqual(tracked["history_status"], "APPLIED | SAVED")
+        self.assertEqual(tracked["application_state"], "NOT_STARTED")
+        self.assertEqual(history_only["history_status"], "SAVED")
+        self.assertEqual(history_only["application_state"], "HISTORY_ONLY")
+
     def test_new_history_snapshot_updates_matching_rows_and_retains_omitted_roles(self):
         headers = ["Job Title", "Company Name", "Location", "Job URL", "Status"]
         first_path = self.root / "history-first.csv"
@@ -561,6 +573,15 @@ class MuseRolesTests(unittest.TestCase):
             "http://old.example/job": "INTERVIEWING",
             "http://older.example/job": "APPLIED",
         })
+
+        exported = self.cli(self.root, "export")
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        with (self.paths["exports"] / "roles.csv").open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        history_row = next(row for row in rows if row["record_type"] == "IMPORTED_HISTORY")
+        self.assertEqual(history_row["url"], "http://old.example/job")
+        self.assertIn("credential-free HTTPS", history_row["notes"])
+        self.assertEqual(history_row["application_state"], "HISTORY_ONLY")
 
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])

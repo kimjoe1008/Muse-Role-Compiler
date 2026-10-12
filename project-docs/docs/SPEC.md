@@ -75,7 +75,7 @@ Use the existing tracker, preferably SQLite if already present, with private fil
 
 If submission may have happened and the result is unclear, record SUBMISSION_UNKNOWN and stop automatic retries. Absence of a confirmation is not proof of failure. The user can reconcile manually; no employer admin API or automated negative lookup is required. An unresolved attempt may remain blocked indefinitely without stopping unrelated work.
 
-Keep review decisions separate from application states and later hiring outcomes. Export stable IDs, company/title/location/link, decision, application state, applied date, and notes. Neutralize spreadsheet formula-like untrusted text. Imports never authorize applications.
+Keep review decisions separate from application states and later hiring outcomes. Export tracked roles plus history-only imported rows, with stable IDs where assigned, company/title/location/link, decision, application state, applied date, history source/status, and notes. Label history-only rows clearly and never convert imported statuses into application evidence. Neutralize spreadsheet formula-like untrusted text. Imports never authorize applications.
 
 ## Out of scope
 
