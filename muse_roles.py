@@ -353,9 +353,11 @@ def imported_history_for_url(db: sqlite3.Connection, url: str) -> list[dict[str,
         """SELECT imports.source, rows.status, rows.applied_date, rows.status_date,
         rows.archived, rows.notes FROM imported_history_rows AS rows
         JOIN history_imports AS imports ON imports.import_id=rows.import_id
-        WHERE rows.canonical_url=? AND imports.import_id=(
-            SELECT MAX(latest.import_id) FROM history_imports AS latest
-            WHERE latest.source=imports.source
+        WHERE rows.canonical_url=? AND rows.import_id=(
+            SELECT MAX(latest.import_id)
+            FROM imported_history_rows AS latest_rows
+            JOIN history_imports AS latest ON latest.import_id=latest_rows.import_id
+            WHERE latest.source=imports.source AND latest_rows.canonical_url=rows.canonical_url
         ) ORDER BY imports.source, rows.row_number""",
         (normalize_url(url),),
     )]
@@ -587,7 +589,7 @@ def discover_source(source: dict[str, Any]) -> tuple[list[dict[str, Any]], str, 
     tenant = str(source.get("tenant", "")).strip()
     company = str(source.get("company", tenant)).strip()
     if not re.fullmatch(r"[A-Za-z0-9_-]+", tenant):
-        raise ValueError("Source tenant must be a Greenhouse board token or Lever site name")
+        raise ValueError("Source tenant must be a Greenhouse board token, Lever site name, or Ashby board name")
     if kind == "greenhouse":
         host = "boards-api.greenhouse.io"
         url = f"https://{host}/v1/boards/{urllib.parse.quote(tenant)}/jobs?content=true"
@@ -608,8 +610,21 @@ def discover_source(source: dict[str, Any]) -> tuple[list[dict[str, Any]], str, 
             "workplace_type": (row.get("categories") or {}).get("workplaceType"),
             "url": row.get("hostedUrl"), "description": row.get("descriptionPlain", ""),
         } for row in payload]
+    elif kind == "ashby":
+        host = "api.ashbyhq.com"
+        url = f"https://{host}/posting-api/job-board/{urllib.parse.quote(tenant)}?includeCompensation=true"
+        payload = fetch_json(url, host)
+        if not isinstance(payload, dict) or not isinstance(payload.get("jobs"), list):
+            raise ValueError("Ashby board response did not contain a jobs list")
+        jobs = [{
+            "id": row.get("id"), "company": company, "title": row.get("title"),
+            "location": row.get("location") or "Unknown",
+            "workplace_type": row.get("workplaceType") or ("Remote" if row.get("isRemote") else None),
+            "url": row.get("jobUrl"),
+            "description": row.get("descriptionPlain") or row.get("descriptionHtml", ""),
+        } for row in payload["jobs"] if row.get("isListed", True)]
     else:
-        raise ValueError(f"Unsupported source type {kind!r}; use greenhouse or lever")
+        raise ValueError(f"Unsupported source type {kind!r}; use greenhouse, lever, or ashby")
     return jobs, kind, url
 
 
@@ -909,7 +924,7 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "discover":
             sources = preferences.get("search", {}).get("enabled_sources", [])
             if not sources:
-                raise ValueError("No sources configured; add Greenhouse or Lever boards to search.enabled_sources")
+                raise ValueError("No sources configured; add Greenhouse, Lever, or Ashby boards to search.enabled_sources")
             result = []
             remaining = preferences.get("search", {}).get("max_roles_to_review_per_run", 10)
             if not isinstance(remaining, int) or remaining < 1:

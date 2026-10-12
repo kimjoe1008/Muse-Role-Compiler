@@ -21,7 +21,7 @@ Tested on Windows with Python 3.12.6 on 2026-10-09. The helper uses only the Pyt
 | Help | `python muse_roles.py --help` | PASS |
 | Initialize private templates and SQLite | `python muse_roles.py init` | PASS in a temporary root |
 | Inspect setup and resume SHA-256 | `python muse_roles.py inspect` | PASS in synthetic CLI test; no real resume used |
-| Discover configured Greenhouse/Lever boards | `python muse_roles.py discover` | Mocked adapter tests PASS; bounded live run reported two HTTP 200 feeds and zero title-filter matches |
+| Discover configured Greenhouse/Lever/Ashby boards | `python muse_roles.py discover` | Mocked adapter tests PASS; bounded live Greenhouse/Lever run reported two HTTP 200 feeds and zero title-filter matches; Ashby endpoint separately observed live |
 | Ingest a Muse-observed posting | `python muse_roles.py ingest` with one JSON object on stdin | PASS in synthetic CLI test |
 | Import external history | `python muse_roles.py history import path\to\history.csv --source Simplify` | PASS in synthetic CLI test; repeat import is a no-op and exact-URL status conflicts are reported |
 | Review list/detail | `python muse_roles.py list --limit 10`; `python muse_roles.py show J-...` | PASS; output includes source identities and possible duplicate IDs |
@@ -35,7 +35,7 @@ Private files are created under `private/`: `config/profile.json`, `config/prefe
 
 ### Online role sources
 
-The current `discover` command has direct adapters for Greenhouse and Lever public boards. Ashby-hosted boards are a practical next adapter candidate but are not implemented here. Curated lists and job-search sites such as Simplify, YC Work at a Startup, Wellfound, Handshake, LinkedIn, and employer career pages can supplement searches when available. Unless a supported public adapter is implemented and tested, inspect those sources with Muse and ingest individual verified postings; do not imply exhaustive coverage or scrape around access controls.
+The current `discover` command has direct adapters for Greenhouse, Lever, and Ashby public boards. Configure Ashby with `{"type":"ashby","tenant":"board-name","company":"Employer"}` under `search.enabled_sources`; use the public board name as `tenant`. The adapter reads Ashby's public job-board endpoint and excludes records explicitly marked unlisted. Curated lists and job-search sites such as Simplify, YC Work at a Startup, Wellfound, Handshake, LinkedIn, and employer career pages can supplement searches when available. Unless a supported public adapter is implemented and tested, inspect those sources with Muse and ingest individual verified postings; do not imply exhaustive coverage or scrape around access controls.
 
 The dated Simplify CSV in `project-docs/docs/` is an input export, not the live SQLite tracker. Import a copy or the supplied file into the private database with:
 
@@ -43,7 +43,7 @@ The dated Simplify CSV in `project-docs/docs/` is an input export, not the live 
 python muse_roles.py history import project-docs/docs/Simplify_Tracked_Jobs_2026-10-11.csv --source Simplify
 ```
 
-The import is a source snapshot and is safe to repeat unchanged. Re-import a newer export with the same `--source` label so it becomes the current snapshot while older imports remain in the database. Matching uses exact normalized HTTPS URLs only. Conflicting statuses for one URL are reported and block optional application preflight. `list` omits roles with imported prior-application outcomes by default; use `list --include-history` to inspect them. `show` includes source status/date under `imported_history`. Imported rows do not change `application_state`, prove employer confirmation, or create approval. Weak company/title matches are not merged automatically.
+The import is a source snapshot and is safe to repeat unchanged. Re-import a newer export with the same `--source` label to update rows for URLs it contains; URLs omitted from the newer export retain their prior history. Matching uses exact normalized HTTPS URLs only. Conflicting statuses for one URL within the current snapshot are reported and block optional application preflight. `list` omits roles with imported prior-application outcomes by default; use `list --include-history` to inspect them. `show` includes source status/date under `imported_history`. Imported rows do not change `application_state`, prove employer confirmation, or create approval. Weak company/title matches are not merged automatically.
 
 For a synthetic smoke run, keep state separate from the user's real setup:
 

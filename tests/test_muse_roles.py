@@ -193,6 +193,26 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(gh[0]["company"], "acme")
         self.assertEqual(lv[0]["workplace_type"], "remote")
 
+    def test_ashby_adapter_normalizes_listed_public_jobs(self):
+        payload = {"jobs": [
+            {"id": "job-1", "title": "Software Engineer I", "location": "New York City",
+             "workplaceType": "Hybrid", "isRemote": True, "isListed": True,
+             "jobUrl": "https://jobs.ashbyhq.com/acme/job-1", "descriptionPlain": "Build software."},
+            {"id": "job-2", "title": "Hidden role", "location": "Remote", "isListed": False,
+             "jobUrl": "https://jobs.ashbyhq.com/acme/job-2", "descriptionPlain": ""},
+        ]}
+        with patch.object(muse_roles, "fetch_json", return_value=payload) as fetch:
+            jobs, kind, source_url = muse_roles.discover_source(
+                {"type": "ashby", "tenant": "acme", "company": "Acme"}
+            )
+        self.assertEqual(kind, "ashby")
+        self.assertEqual(source_url, "https://api.ashbyhq.com/posting-api/job-board/acme?includeCompensation=true")
+        self.assertEqual(len(jobs), 1)
+        self.assertEqual(jobs[0]["id"], "job-1")
+        self.assertEqual(jobs[0]["workplace_type"], "Hybrid")
+        self.assertEqual(jobs[0]["description"], "Build software.")
+        fetch.assert_called_once_with(source_url, "api.ashbyhq.com")
+
     def test_discovery_persists_source_results_and_obeys_shortlist_limit(self):
         self.preferences["search"]["enabled_sources"] = [
             {"type": "greenhouse", "tenant": "acme"},
@@ -355,6 +375,30 @@ class MuseRolesTests(unittest.TestCase):
         full_list = self.cli(self.root, "list", "--include-history")
         self.assertEqual(full_list.returncode, 0, full_list.stderr)
         self.assertEqual(len(json.loads(full_list.stdout)), 1)
+
+    def test_new_history_snapshot_updates_matching_rows_and_retains_omitted_roles(self):
+        headers = ["Job Title", "Company Name", "Location", "Job URL", "Status"]
+        first_path = self.root / "history-first.csv"
+        with first_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(headers)
+            writer.writerow(["Engineer I", "Acme", "Seattle", "https://jobs.example/one", "APPLIED"])
+            writer.writerow(["Engineer I", "Acme", "Seattle", "https://jobs.example/two", "SAVED"])
+        db = muse_roles.connect(self.paths["database"])
+        muse_roles.import_history_csv(db, first_path, "Simplify")
+
+        next_path = self.root / "history-next.csv"
+        with next_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(headers)
+            writer.writerow(["Engineer I", "Acme", "Seattle", "https://jobs.example/one", "INTERVIEWING"])
+        muse_roles.import_history_csv(db, next_path, "Simplify")
+
+        updated = muse_roles.imported_history_for_url(db, "https://jobs.example/one")
+        retained = muse_roles.imported_history_for_url(db, "https://jobs.example/two")
+        self.assertEqual([row["status"] for row in updated], ["INTERVIEWING"])
+        self.assertEqual([row["status"] for row in retained], ["SAVED"])
+        db.close()
 
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])

@@ -16,7 +16,7 @@ Role approval is required before candidate details are entered or uploaded. Ther
 
 ## Development status
 
-The repository includes portable Greenhouse/Lever discovery, review, idempotent external-history CSV import, preflight, and outcome-tracking helpers. Broader source coverage remains planned. Read [PROGRESS](docs/PROGRESS.md) for observed status and [TASKS](docs/TASKS.md) for the current discovery-first priorities.
+The repository includes portable Greenhouse/Lever/Ashby discovery, review, idempotent external-history CSV import, preflight, and outcome-tracking helpers. Additional source coverage remains planned. Read [PROGRESS](docs/PROGRESS.md) for observed status and [TASKS](docs/TASKS.md) for the current discovery-first priorities.
 
 To develop an existing repository, start with [START_HERE](START_HERE.md) and the [coding-agent prompt](docs/PROMPTS.md). Reuse working discovery/tracking code. No new dashboard, Windows sandbox, custom model service, or browser automation framework is needed.
 

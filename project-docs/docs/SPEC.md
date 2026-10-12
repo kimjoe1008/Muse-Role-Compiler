@@ -25,7 +25,7 @@ This supersedes conflicting standalone-runtime requirements. It does not claim t
 
 ## Discovery and screening
 
-Start with working direct ATS adapters, currently Greenhouse and Lever, and add practical sources based on observed search gaps. Ashby public job boards are a strong next adapter candidate. Curated early-career lists and job-search sites such as Simplify, YC Work at a Startup, Wellfound, Handshake, LinkedIn, and company career pages can provide leads where permitted. Distinguish implemented adapters from manually inspected sources; do not claim exhaustive coverage or build a universal crawler. A URL found through Muse's supported search/browser enters the same normalization and review flow.
+Start with working direct ATS adapters, currently Greenhouse, Lever, and Ashby, and add practical sources based on observed search gaps. Curated early-career lists and job-search sites such as Simplify, YC Work at a Startup, Wellfound, Handshake, LinkedIn, and company career pages can provide leads where permitted. Distinguish implemented adapters from manually inspected sources; do not claim exhaustive coverage or build a universal crawler. A URL found through Muse's supported search/browser enters the same normalization and review flow.
 
 Record each source's scan time, status, coverage limits, and failures. A bounded feed-order scan is not evidence that later postings do not match. When a source supports paging, use a configured scan budget and report how much was examined. Respect site terms, access controls, and rate limits; do not evade bot protections.
 
