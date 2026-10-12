@@ -407,6 +407,11 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual([row["result"] for row in runs], ["FAILED", "OK"])
         self.assertIn("feed unavailable", runs[0]["detail"])
 
+    def test_discovery_without_sources_suggests_source_cli(self):
+        result = self.cli(self.root, "discover")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("python muse_roles.py source add TYPE --tenant BOARD", result.stderr)
+
     def test_cli_ingest_list_exact_decision_and_export(self):
         self.paths["resume"].write_bytes(b"synthetic resume")
         self.profile["confirmed_by_user_at"] = "2026-10-09"

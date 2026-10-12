@@ -1224,7 +1224,7 @@ def run(args: argparse.Namespace) -> int:
         if args.command == "discover":
             sources = preferences.get("search", {}).get("enabled_sources", [])
             if not sources:
-                raise ValueError("No sources configured; add Greenhouse, Lever, or Ashby boards to search.enabled_sources")
+                raise ValueError("No sources configured; add a public board with `python muse_roles.py source add TYPE --tenant BOARD --company NAME`")
             result = []
             remaining = preferences.get("search", {}).get("max_roles_to_review_per_run", 10)
             if not isinstance(remaining, int) or remaining < 1:
