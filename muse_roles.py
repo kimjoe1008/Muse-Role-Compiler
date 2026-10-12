@@ -393,6 +393,40 @@ def history_requires_reconciliation(history: list[dict[str, Any]]) -> str | None
     return None
 
 
+def source_status(db: sqlite3.Connection, limit: int) -> list[dict[str, Any]]:
+    if limit < 1:
+        raise ValueError("--limit must be positive")
+    sources = [row["source"] for row in db.execute(
+        "SELECT DISTINCT source FROM source_runs ORDER BY source"
+    )]
+    result = []
+    for source in sources:
+        latest = db.execute(
+            "SELECT started_at, result, detail FROM source_runs WHERE source=? ORDER BY run_id DESC LIMIT 1",
+            (source,),
+        ).fetchone()
+        success = db.execute(
+            "SELECT started_at, detail FROM source_runs WHERE source=? AND result='OK' ORDER BY run_id DESC LIMIT 1",
+            (source,),
+        ).fetchone()
+        observations = db.execute(
+            """SELECT COUNT(DISTINCT job_id) AS role_count, MAX(observed_at) AS last_seen
+            FROM observations WHERE substr(source, 1, length(?))=?""",
+            (source + ":", source + ":"),
+        ).fetchone()
+        result.append({
+            "source": source,
+            "last_run_at": latest["started_at"],
+            "last_status": latest["result"],
+            "last_detail": latest["detail"],
+            "last_success_at": success["started_at"] if success else None,
+            "last_success_detail": success["detail"] if success else None,
+            "tracked_roles": observations["role_count"],
+            "last_role_seen_at": observations["last_seen"],
+        })
+    return result[:limit]
+
+
 def infer_arrangement(location: str, value: str | None = None) -> str:
     text = f"{location} {value or ''}".lower()
     if "remote" in text or "work from home" in text:
@@ -555,6 +589,31 @@ def stable_id(record: dict[str, Any], db: sqlite3.Connection) -> str:
             return str(row["job_id"])
     identity = f"{record['provider']}:{record['tenant']}:{req}" if req else record["canonical_url"]
     return f"J-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:12].upper()}"
+
+
+def classify_discovery_record(db: sqlite3.Connection, raw: dict[str, Any], provider: str,
+                             tenant: str, source_url: str | None = None) -> str:
+    record = canonical_record(raw, provider, tenant, source_url)
+    job_id = stable_id(record, db)
+    existing = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+    history = imported_history_for_url(db, record["canonical_url"])
+    decision = current_decision(db, job_id) if existing else None
+    attempt = latest_attempt(db, job_id) if existing else None
+    history_statuses = {item["status"] for item in history}
+    resolved = (
+        bool(history_requires_reconciliation(history))
+        or bool(history_statuses & {"APPLIED", "SCREENING", "INTERVIEWING", "REJECTED", "WITHDRAWN"})
+        or bool(decision and decision["status"] in {"SKIPPED", "REVOKED"})
+        or bool(attempt and attempt["state"] == "APPLIED")
+    )
+    if resolved:
+        return "resolved"
+    if not existing:
+        return "previously_seen" if history else "new"
+    comparable = ("company", "title", "location", "work_arrangement", "canonical_url", "description")
+    if any(str(existing[key] or "") != str(record[key] or "") for key in comparable):
+        return "changed"
+    return "previously_seen"
 
 
 def save_record(db: sqlite3.Connection, raw: dict[str, Any], provider: str, tenant: str,
@@ -888,6 +947,8 @@ def command_parser() -> argparse.ArgumentParser:
     commands.add_parser("init", help="Create private config templates and SQLite state")
     commands.add_parser("inspect", help="Check private configuration and show resume hash")
     commands.add_parser("discover", help="Query configured Greenhouse and Lever boards")
+    source_status_command = commands.add_parser("source-status", help="Show scan health and tracked-role freshness per source")
+    source_status_command.add_argument("--limit", type=int, default=100)
     ingest = commands.add_parser("ingest", help="Normalize a Muse-observed public job record from JSON")
     ingest.add_argument("--file", type=Path, help="JSON file; omit to read one JSON object from stdin")
     history = commands.add_parser("history", help="Import external role and application history")
@@ -964,16 +1025,22 @@ def run(args: argparse.Namespace) -> int:
                     eligible_records = 0
                     history_suppressed = 0
                     already_tracked = 0
+                    classifications = {"new": 0, "changed": 0, "previously_seen": 0, "resolved": 0}
                     for record in records:
                         normalized = canonical_record(record, kind, str(source["tenant"]), source_url)
                         if history_requires_reconciliation(
                             imported_history_for_url(db, normalized["canonical_url"])
                         ):
                             history_suppressed += 1
+                            classifications["resolved"] += 1
                             continue
                         include, _, _ = evaluate(normalized, profile, preferences)
                         if include:
                             eligible_records += 1
+                            classification = classify_discovery_record(
+                                db, record, kind, str(source["tenant"]), source_url
+                            )
+                            classifications[classification] += 1
                             job_id = stable_id(normalized, db)
                             exists = db.execute("SELECT 1 FROM jobs WHERE job_id=?", (job_id,)).fetchone()
                             if exists:
@@ -991,11 +1058,14 @@ def run(args: argparse.Namespace) -> int:
                                (label, started, "OK",
                                           f"received={len(records)} scanned={len(records)} eligible={eligible_records} "
                                 f"already_tracked={already_tracked} history_suppressed={history_suppressed} "
-                                f"new_saved={saved}"))
+                                          f"new={classifications['new']} changed={classifications['changed']} "
+                                          f"previously_seen={classifications['previously_seen']} "
+                                          f"resolved={classifications['resolved']} new_saved={saved}"))
                     result.append({"source": label, "status": "OK", "received": len(records),
                                               "scanned": len(records), "eligible": eligible_records,
                                    "already_tracked": already_tracked,
-                                   "history_suppressed": history_suppressed, "saved": saved})
+                                              "history_suppressed": history_suppressed,
+                                              **classifications, "saved": saved})
                 except (ValueError, KeyError, TypeError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError) as exc:
                     db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
                                (label, started, "FAILED", str(exc)[:500]))
@@ -1007,6 +1077,9 @@ def run(args: argparse.Namespace) -> int:
             input_path = args.file if args.file.is_absolute() else root / args.file
             result = import_history_csv(db, input_path.resolve(), args.source or input_path.stem)
             print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "source-status":
+            print(json.dumps(source_status(db, args.limit), indent=2))
             return 0
         if args.command == "ingest":
             if args.file:

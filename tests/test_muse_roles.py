@@ -282,6 +282,53 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 2)
         db.close()
 
+    def test_discovery_reports_new_changed_seen_and_resolved_counts(self):
+        self.preferences["search"]["enabled_sources"] = [{"type": "greenhouse", "tenant": "acme"}]
+        self.paths["preferences"].write_text(json.dumps(self.preferences), encoding="utf-8")
+        role = {"id": "gh-1", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+                "url": "https://jobs.example/role", "description": "Initial description."}
+        args = argparse.Namespace(command="discover", root=self.root)
+
+        def run_discovery(record):
+            with patch.object(muse_roles, "discover_source", return_value=([record], "greenhouse", "https://boards-api.greenhouse.io/feed")), contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(muse_roles.run(args), 0)
+            return json.loads(output.getvalue())[0]
+
+        self.assertEqual(run_discovery(role)["new"], 1)
+        self.assertEqual(run_discovery(role)["previously_seen"], 1)
+        changed_role = {**role, "description": "Updated requirements."}
+        self.assertEqual(run_discovery(changed_role)["changed"], 1)
+
+        history_path = self.root / "history.csv"
+        with history_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
+            writer.writerow([role["title"], role["company"], role["location"], role["url"], "APPLIED"])
+        db = muse_roles.connect(self.paths["database"])
+        muse_roles.import_history_csv(db, history_path, "Simplify")
+        db.close()
+        resolved = run_discovery(changed_role)
+        self.assertEqual((resolved["resolved"], resolved["history_suppressed"], resolved["saved"]), (1, 1, 0))
+
+    def test_source_status_retains_last_success_and_role_freshness_after_failure(self):
+        db = muse_roles.connect(self.paths["database"])
+        role = {"id": "gh-1", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+                "url": "https://jobs.example/role", "description": ""}
+        muse_roles.save_record(db, role, "greenhouse", "acme_board", self.profile, self.preferences)
+        db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
+               ("greenhouse:acme_board", "2026-10-10T10:00:00+00:00", "OK", "scanned=25 saved=2"))
+        db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
+               ("greenhouse:acme_board", "2026-10-11T10:00:00+00:00", "FAILED", "feed unavailable"))
+        db.commit()
+        status = muse_roles.source_status(db, 1)
+        db.close()
+        self.assertEqual(len(status), 1)
+        self.assertEqual(status[0]["last_status"], "FAILED")
+        self.assertEqual(status[0]["last_detail"], "feed unavailable")
+        self.assertEqual(status[0]["last_success_detail"], "scanned=25 saved=2")
+        self.assertEqual(status[0]["tracked_roles"], 1)
+        self.assertIsNotNone(status[0]["last_role_seen_at"])
+
     def test_discovery_keeps_a_source_failure_when_another_source_succeeds(self):
         self.preferences["search"]["enabled_sources"] = [
             {"type": "greenhouse", "tenant": "offline"},
