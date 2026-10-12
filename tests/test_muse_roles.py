@@ -400,6 +400,31 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual([row["status"] for row in retained], ["SAVED"])
         db.close()
 
+    def test_possible_history_match_is_visible_without_suppressing_role(self):
+        history_path = self.root / "history.csv"
+        with history_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
+            writer.writerow(["Software Engineer I", "Acme", "Seattle", "https://old.example/job", "APPLIED"])
+        db = muse_roles.connect(self.paths["database"])
+        muse_roles.import_history_csv(db, history_path, "Simplify")
+        raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
+               "url": "https://new.example/job", "description": ""}
+        job_id, included = muse_roles.save_record(db, raw, "ashby", "acme", self.profile, self.preferences)
+        self.assertTrue(included)
+        db.commit()
+        row = db.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+        view = muse_roles.job_view(db, row)
+        self.assertEqual(view["imported_history"], [])
+        self.assertEqual(view["possible_history_matches"][0]["status"], "APPLIED")
+        self.assertEqual(view["possible_history_matches"][0]["canonical_url"], "https://old.example/job")
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0], 1)
+        db.close()
+
+        listing = self.cli(self.root, "list")
+        self.assertEqual(listing.returncode, 0, listing.stderr)
+        self.assertEqual(len(json.loads(listing.stdout)), 1)
+
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])
         job = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle", "url": "https://jobs.example/role"}

@@ -363,6 +363,25 @@ def imported_history_for_url(db: sqlite3.Connection, url: str) -> list[dict[str,
     )]
 
 
+def possible_history_matches(db: sqlite3.Connection, company: str, title: str,
+                             location: str, url: str) -> list[dict[str, Any]]:
+    return [dict(row) for row in db.execute(
+        """SELECT imports.source, rows.company, rows.title, rows.location, rows.status,
+        rows.applied_date, rows.status_date, rows.canonical_url FROM imported_history_rows AS rows
+        JOIN history_imports AS imports ON imports.import_id=rows.import_id
+        WHERE lower(trim(rows.company))=lower(trim(?))
+        AND lower(trim(rows.title))=lower(trim(?))
+        AND lower(trim(rows.location))=lower(trim(?))
+        AND rows.canonical_url<>? AND rows.import_id=(
+            SELECT MAX(latest.import_id)
+            FROM imported_history_rows AS latest_rows
+            JOIN history_imports AS latest ON latest.import_id=latest_rows.import_id
+            WHERE latest.source=imports.source AND latest_rows.canonical_url=rows.canonical_url
+        ) ORDER BY imports.source, rows.row_number""",
+        (company, title, location, normalize_url(url)),
+    )]
+
+
 def history_requires_reconciliation(history: list[dict[str, Any]]) -> str | None:
     if not history:
         return None
@@ -845,6 +864,9 @@ def job_view(db: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
         "blockers": json.loads(row["blockers"]), "sources": sources,
         "possible_duplicate_ids": sorted(possible_duplicates),
         "imported_history": imported_history_for_url(db, str(row["canonical_url"])),
+        "possible_history_matches": possible_history_matches(
+            db, str(row["company"]), str(row["title"]), str(row["location"]), str(row["canonical_url"])
+        ),
         "decision": decision["status"] if decision else "PENDING",
         "application_state": attempt["state"] if attempt else "NOT_STARTED",
         "attempt_id": attempt["attempt_id"] if attempt else None,
