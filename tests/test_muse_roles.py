@@ -314,7 +314,9 @@ class MuseRolesTests(unittest.TestCase):
         db = muse_roles.connect(self.paths["database"])
         role = {"id": "gh-1", "company": "Acme", "title": "Software Engineer I", "location": "Seattle",
                 "url": "https://jobs.example/role", "description": ""}
-        muse_roles.save_record(db, role, "greenhouse", "acme_board", self.profile, self.preferences)
+        with patch.object(muse_roles, "now", side_effect=["2026-10-10T09:00:00+00:00", "2026-10-11T09:00:00+00:00"]):
+            muse_roles.save_record(db, role, "greenhouse", "acme_board", self.profile, self.preferences)
+            muse_roles.save_record(db, role, "greenhouse", "acme_board", self.profile, self.preferences)
         db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
                ("greenhouse:acme_board", "2026-10-10T10:00:00+00:00", "OK", "scanned=25 saved=2"))
         db.execute("INSERT INTO source_runs(source, started_at, result, detail) VALUES (?, ?, ?, ?)",
@@ -327,7 +329,7 @@ class MuseRolesTests(unittest.TestCase):
         self.assertEqual(status[0]["last_detail"], "feed unavailable")
         self.assertEqual(status[0]["last_success_detail"], "scanned=25 saved=2")
         self.assertEqual(status[0]["tracked_roles"], 1)
-        self.assertIsNotNone(status[0]["last_role_seen_at"])
+        self.assertEqual(status[0]["last_role_seen_at"], "2026-10-11T09:00:00+00:00")
 
     def test_discovery_keeps_a_source_failure_when_another_source_succeeds(self):
         self.preferences["search"]["enabled_sources"] = [
@@ -478,9 +480,10 @@ class MuseRolesTests(unittest.TestCase):
             writer = csv.writer(stream)
             writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
             writer.writerow(["Software Engineer I", "Acme", "Seattle", "http://old.example/job", "APPLIED"])
+            writer.writerow(["Software Engineer I", "Acme", "Seattle", "http://older.example/job", "APPLIED"])
         db = muse_roles.connect(self.paths["database"])
         summary = muse_roles.import_history_csv(db, history_path, "Simplify")
-        self.assertEqual((summary["rows"], summary["unique_urls"], summary["duplicate_url_rows"]), (1, 0, 0))
+        self.assertEqual((summary["rows"], summary["unique_urls"], summary["duplicate_url_rows"]), (2, 0, 0))
         self.assertEqual(summary["unmatchable_url_rows"][0]["csv_line"], 2)
 
         raw = {"company": "Acme", "title": "Software Engineer I", "location": "Seattle",
@@ -495,7 +498,22 @@ class MuseRolesTests(unittest.TestCase):
         self.assertIn("credential-free HTTPS", hint["url_error"])
         self.assertEqual(hint["canonical_url"], "")
         self.assertEqual(muse_roles.imported_history_for_url(db, raw["url"]), [])
+
+        next_path = self.root / "history-next.csv"
+        with next_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.writer(stream)
+            writer.writerow(["Job Title", "Company Name", "Location", "Job URL", "Status"])
+            writer.writerow(["Software Engineer I", "Acme", "Seattle", "http://old.example/job", "INTERVIEWING"])
+        muse_roles.import_history_csv(db, next_path, "Simplify")
+        hints = muse_roles.possible_history_matches(
+            db, "Acme", "Software Engineer I", "Seattle", raw["url"]
+        )
+        hint_statuses = {item["source_url"]: item["status"] for item in hints}
         db.close()
+        self.assertEqual(hint_statuses, {
+            "http://old.example/job": "INTERVIEWING",
+            "http://older.example/job": "APPLIED",
+        })
 
     def test_approval_requires_the_single_resume_and_confirmed_profile(self):
         db = muse_roles.connect(self.paths["database"])

@@ -393,7 +393,11 @@ def possible_history_matches(db: sqlite3.Connection, company: str, title: str,
             SELECT MAX(latest.import_id)
             FROM imported_history_rows AS latest_rows
             JOIN history_imports AS latest ON latest.import_id=latest_rows.import_id
-            WHERE latest.source=imports.source AND latest_rows.canonical_url=rows.canonical_url
+            WHERE latest.source=imports.source AND (
+                (rows.canonical_url<>'' AND latest_rows.canonical_url=rows.canonical_url)
+                OR (rows.canonical_url='' AND latest_rows.canonical_url=''
+                    AND latest_rows.source_url=rows.source_url)
+            )
         ) ORDER BY imports.source, rows.row_number""",
         (company, title, location, normalize_url(url)),
     )]
@@ -655,7 +659,8 @@ def save_record(db: sqlite3.Connection, raw: dict[str, Any], provider: str, tena
          json.dumps(evidence), json.dumps(blockers), timestamp, timestamp),
     )
     source_identity = f"{provider}:{tenant}:{record['requisition_id'] or 'url'}"
-    db.execute("INSERT OR IGNORE INTO observations VALUES (?, ?, ?, ?)",
+    db.execute("""INSERT INTO observations VALUES (?, ?, ?, ?)
+               ON CONFLICT(job_id, source, source_url) DO UPDATE SET observed_at=excluded.observed_at""",
                (job_id, source_identity, record["source_url"], timestamp))
     return job_id, True
 
